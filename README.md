@@ -44,7 +44,7 @@ To use a real model, set one key in `.env.local`:
 - `ANTHROPIC_API_KEY`: Claude, default `claude-sonnet-5-5`
   (`ANTHROPIC_MODEL` to override). The brief's primary option.
 - `OPENAI_API_KEY`: GPT-4o by default (`OPENAI_MODEL`).
-- `GEMINI_API_KEY`: Google Gemini, default `gemini-3.8-flash`
+- `GEMINI_API_KEY`: Google Gemini, default `gemini-flash-latest`
   (`GEMINI_MODEL`). The brief doesn't name Gemini; it's included because
   its free tier needs no card, which makes it the easy way to try the app
   against a real model. Get a key at https://aistudio.google.com/apikey.
