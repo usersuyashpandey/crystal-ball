@@ -1,19 +1,29 @@
 openapi: 3.0.3
 info:
   title: Crystal Ball Approvals Assistant API
-  version: "1.0.0"
+  version: "1.1.0"
   description: >
-    Hand-written OpenAPI contract mirroring lib/schemas.ts (source of truth).
-    Per the brief (§3, "API contract"), this is the OpenAPI-first artifact —
-    no Swagger UI wired up, just a readable mirror of the Zod schemas that
-    every route handler actually validates against.
+    Hand-written OpenAPI mirror of lib/schemas.ts, which is the source of
+    truth (every route validates requests with it, and every model payload
+    is validated with it before reaching the client). No Swagger UI, per
+    the brief's "OpenAPI-first spirit" note.
+
+    Streaming endpoints return text/event-stream with frames, in order:
+    zero or more `token` ({text}) — narrative only; exactly one
+    `structured` — the action's payload, always schema-valid; exactly one
+    `done` ({mode, structuredSource}). A stream that closes without `done`
+    was cut off and should be treated as an error by the client.
+
+    Generation failures never change the HTTP status: they degrade inside
+    the stream (mode "degraded"). 400 and 429 happen only before any model
+    call starts.
 servers:
   - url: /api/assistant
 
 paths:
   /summary:
     post:
-      summary: Present me Summary — SSE stream of a prioritized queue summary
+      summary: Present me Summary — prioritised narrative + one alert per queue item
       requestBody:
         content:
           application/json:
@@ -22,38 +32,24 @@ paths:
               properties:
                 language:
                   type: string
+                  minLength: 2
+                  maxLength: 32
                   default: en
+                  description: BCP-47 tag; the client sends navigator.language.
       responses:
         "200":
-          description: >
-            text/event-stream. Frames: `meta` ({mode}), `token` (partial
-            text, repeated), `structured` (SummaryStructured, see below),
-            `done`.
+          description: "SSE stream; `structured` is SummaryStructured."
           content:
             text/event-stream:
-              schema:
-                type: string
-      x-structured-payload:
-        SummaryStructured:
-          type: object
-          required: [alerts, generatedAt]
-          properties:
-            alerts:
-              type: array
-              items:
-                type: object
-                required: [itemId, title, urgency, reason]
-                properties:
-                  itemId: { type: string }
-                  title: { type: string }
-                  urgency: { type: string, enum: [high, medium, low] }
-                  reason: { type: string, maxLength: 240 }
-            generatedAt: { type: string, format: date-time }
+              schema: { type: string }
+        "400": { $ref: "#/components/responses/InvalidRequest" }
+        "429": { $ref: "#/components/responses/RateLimited" }
 
   /chat:
     post:
-      summary: Talk to me — multi-turn SSE conversation about the queue
+      summary: Talk to me — multi-turn conversation about the queue
       requestBody:
+        required: true
         content:
           application/json:
             schema:
@@ -63,24 +59,22 @@ paths:
                 message: { type: string, minLength: 1, maxLength: 2000 }
                 history:
                   type: array
-                  items:
-                    type: object
-                    required: [role, content]
-                    properties:
-                      role: { type: string, enum: [user, assistant] }
-                      content: { type: string }
+                  maxItems: 20
+                  items: { $ref: "#/components/schemas/ChatMessage" }
       responses:
         "200":
-          description: "text/event-stream. Frames: meta, token*, structured, done."
+          description: "SSE stream; `structured` is ChatStructured."
           content:
             text/event-stream:
-              schema:
-                type: string
+              schema: { type: string }
+        "400": { $ref: "#/components/responses/InvalidRequest" }
+        "429": { $ref: "#/components/responses/RateLimited" }
 
   /help:
     post:
-      summary: Help me — RAG-grounded answer to an operational question
+      summary: Help me — answer grounded in the retrieved policy sections
       requestBody:
+        required: true
         content:
           application/json:
             schema:
@@ -90,47 +84,50 @@ paths:
                 question: { type: string, minLength: 1, maxLength: 1000 }
       responses:
         "200":
-          description: >
-            text/event-stream. Frames: meta, token*, structured
-            (HelpStructured: citations[], grounded, generatedAt), done.
+          description: "SSE stream; `structured` is HelpStructured."
           content:
             text/event-stream:
-              schema:
-                type: string
+              schema: { type: string }
+        "400": { $ref: "#/components/responses/InvalidRequest" }
+        "429": { $ref: "#/components/responses/RateLimited" }
 
   /teach:
     post:
-      summary: Teach me — step-by-step walkthrough, adapts to follow-ups
+      summary: Teach me — step-by-step walkthrough that adapts to follow-ups
       requestBody:
         content:
           application/json:
             schema:
               type: object
               properties:
-                message: { type: string, maxLength: 2000 }
+                message:
+                  type: string
+                  minLength: 1
+                  maxLength: 2000
+                  description: Omit on the first request for the default walkthrough.
                 history:
                   type: array
-                  items:
-                    type: object
+                  maxItems: 20
+                  items: { $ref: "#/components/schemas/ChatMessage" }
       responses:
         "200":
-          description: "text/event-stream. Frames: meta, token*, structured, done."
+          description: "SSE stream; `structured` is TeachStructured."
           content:
             text/event-stream:
-              schema:
-                type: string
+              schema: { type: string }
+        "400": { $ref: "#/components/responses/InvalidRequest" }
+        "429": { $ref: "#/components/responses/RateLimited" }
 
   /greeting:
     post:
-      summary: Replay Greeting — regenerates a short context-aware greeting
+      summary: Replay Greeting — short context-aware greeting (JSON, not streamed)
       requestBody:
         content:
           application/json:
-            schema:
-              type: object
+            schema: { type: object }
       responses:
         "200":
-          description: Structured JSON (non-streaming; short enough not to need it).
+          description: Greeting. pendingCount is computed from the queue, not by the model.
           content:
             application/json:
               schema:
@@ -140,16 +137,106 @@ paths:
                   greeting: { type: string }
                   pendingCount: { type: integer }
                   generatedAt: { type: string, format: date-time }
-                  mode: { type: string, enum: [live, mock, degraded] }
-        "429":
-          description: Rate limited.
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/ErrorResponse"
+                  mode: { $ref: "#/components/schemas/StreamMode" }
+        "429": { $ref: "#/components/responses/RateLimited" }
 
 components:
+  responses:
+    InvalidRequest:
+      description: Request body failed Zod validation.
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/ErrorResponse" }
+    RateLimited:
+      description: Per-session (30/5 min) or per-IP (120/5 min) limit exceeded.
+      headers:
+        Retry-After:
+          schema: { type: integer }
+          description: Seconds until a request will be accepted.
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/ErrorResponse" }
+
   schemas:
+    StreamMode:
+      type: string
+      enum: [live, mock, degraded]
+      description: >
+        live = configured provider answered; mock = no API key configured,
+        offline provider used; degraded = provider failed or timed out.
+    StructuredSource:
+      type: string
+      enum: [model, fallback]
+      description: >
+        model = the model's payload passed Zod and the checks against the
+        queue / retrieved sections; fallback = it didn't (or was missing),
+        so the route's local fallback was sent instead.
+    TokenFrame:
+      type: object
+      required: [text]
+      properties:
+        text: { type: string }
+    DoneFrame:
+      type: object
+      required: [mode, structuredSource]
+      properties:
+        mode: { $ref: "#/components/schemas/StreamMode" }
+        structuredSource: { $ref: "#/components/schemas/StructuredSource" }
+    ChatMessage:
+      type: object
+      required: [role, content]
+      properties:
+        role: { type: string, enum: [user, assistant] }
+        content: { type: string, minLength: 1, maxLength: 4000 }
+    SummaryStructured:
+      type: object
+      required: [alerts, generatedAt]
+      description: When from the model, alerts cover every queue item exactly once.
+      properties:
+        alerts:
+          type: array
+          minItems: 1
+          items:
+            type: object
+            required: [itemId, title, urgency, reason]
+            properties:
+              itemId: { type: string }
+              title: { type: string }
+              urgency: { type: string, enum: [high, medium, low] }
+              reason: { type: string, maxLength: 240 }
+        generatedAt: { type: string }
+    ChatStructured:
+      type: object
+      required: [generatedAt, referencedItemIds]
+      properties:
+        generatedAt: { type: string }
+        referencedItemIds:
+          type: array
+          items: { type: string }
+          description: Filtered to ids that exist in the queue.
+    HelpStructured:
+      type: object
+      required: [citations, grounded, generatedAt]
+      properties:
+        citations:
+          type: array
+          description: Filtered to policy sections that were actually retrieved.
+          items:
+            type: object
+            required: [heading, snippet]
+            properties:
+              heading: { type: string }
+              snippet: { type: string }
+        grounded:
+          type: boolean
+          description: False if no retrieved section supports the answer.
+        generatedAt: { type: string }
+    TeachStructured:
+      type: object
+      required: [generatedAt, isFollowUp]
+      properties:
+        generatedAt: { type: string }
+        isFollowUp: { type: boolean }
     ErrorResponse:
       type: object
       required: [error, message]
