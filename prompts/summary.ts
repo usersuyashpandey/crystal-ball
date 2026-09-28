@@ -6,11 +6,14 @@ import { ASSISTANT_PERSONA, promptKindTag, queueBlock } from "./context";
 /**
  * "Present me Summary" — versioned prompt export per the brief (§3, "prompts
  * live in /prompts/*.ts as versioned exports, not inline strings inside
- * route handlers"). Bump to SUMMARY_PROMPT_V2 rather than editing this one
+ * route handlers"). Bump to SUMMARY_PROMPT_V3 rather than editing this one
  * in place if the shape or instructions change meaningfully.
  */
-export const SUMMARY_PROMPT_V1 = {
-  version: 1,
+export const SUMMARY_PROMPT_V2 = {
+  version: 2,
+  // v2: shared context now states the current time and each item's
+  // server-computed SLA status; light-formatting rule in the persona.
+  // v1 is in git history (before eb4ddff).
   kind: "summary",
   build(queue: ApprovalItem[], language: string): { system: string; messages: LLMMessage[] } {
     const system = `${promptKindTag("summary")}

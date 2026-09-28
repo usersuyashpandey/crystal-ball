@@ -4,7 +4,7 @@ import { summaryRequestSchema, summaryStructuredSchema } from "@/lib/schemas";
 import { getQueueSnapshot } from "@/lib/queue";
 import { computeHeuristicAlerts } from "@/lib/heuristics";
 import { checkSummaryAgainstQueue } from "@/lib/structuredChecks";
-import { SUMMARY_PROMPT_V1 } from "@/prompts/summary";
+import { SUMMARY_PROMPT_V2 } from "@/prompts/summary";
 
 export const dynamic = "force-dynamic";
 
@@ -17,7 +17,7 @@ export async function POST(req: Request) {
   if (body instanceof Response) return body;
 
   const queue = getQueueSnapshot();
-  const { system, messages } = SUMMARY_PROMPT_V1.build(queue, body.language);
+  const { system, messages } = SUMMARY_PROMPT_V2.build(queue, body.language);
 
   return respondStream({
     system,

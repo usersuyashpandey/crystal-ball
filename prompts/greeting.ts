@@ -9,8 +9,11 @@ import { ASSISTANT_PERSONA, promptKindTag, queueBlock } from "./context";
  * and the route handler derives pendingCount itself rather than trusting
  * the model to count.
  */
-export const GREETING_PROMPT_V1 = {
-  version: 1,
+export const GREETING_PROMPT_V2 = {
+  version: 2,
+  // v2: shared context now states the current time and each item's
+  // server-computed SLA status; light-formatting rule in the persona.
+  // v1 is in git history (before eb4ddff).
   kind: "greeting",
   build(queue: ApprovalItem[]): { system: string; messages: LLMMessage[] } {
     const system = `${promptKindTag("greeting")}

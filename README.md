@@ -114,7 +114,7 @@ npm run build
   `content/approval-policy.md`, following the brief's "keyword retrieval
   over 3-5 chunks is sufficient". No embeddings.
 - **Prompt versioning:** `prompts/*.ts`, versioned exports
-  (`SUMMARY_PROMPT_V1`, …), not inline strings. The shared queue block
+  (`SUMMARY_PROMPT_V2`, …), not inline strings. The shared queue block
   states the current time and each item's `hoursPending` / `slaStatus`,
   computed server-side, so the model never does date arithmetic.
 - **Rendering model text:** `components/RichText.tsx` shows the light
@@ -202,7 +202,7 @@ Greeting.
 ## AI tool usage
 
 Built with Claude (Cowork): scaffolding, the LLM/prompt/streaming layers,
-tests and this README. Three things it got wrong, each found by checking
+tests and this README. Things it got wrong, each found by checking
 behaviour rather than trusting that the code compiled:
 
 - The first `<queue>`/`<policy>` extraction regex matched the literal tag
@@ -213,3 +213,8 @@ behaviour rather than trusting that the code compiled:
   raw JSON leaking into the chat bubble.
 - The skeleton "loading" state could never show in the app. The first
   component test only reached it by passing a hard-coded status prop.
+- Nothing had been tried against a real model until late. Doing that
+  exposed a retired default model (Groq returned 404), and, from reading
+  the actual answers, a prompt with no notion of the current time, so the
+  model called an overdue item one that "can wait". Fixed by sending the
+  current time and server-computed SLA status (prompts v2).

@@ -10,8 +10,11 @@ import { ASSISTANT_PERSONA, promptKindTag, queueBlock } from "./context";
  * same delimiter/structured pattern as the other streaming actions rather
  * than a bespoke format, so it isn't skipped, just simpler.
  */
-export const TEACH_PROMPT_V1 = {
-  version: 1,
+export const TEACH_PROMPT_V2 = {
+  version: 2,
+  // v2: shared context now states the current time and each item's
+  // server-computed SLA status; light-formatting rule in the persona.
+  // v1 is in git history (before eb4ddff).
   kind: "teach",
   build(
     queue: ApprovalItem[],

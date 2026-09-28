@@ -1,7 +1,7 @@
 import { preflight, parseJsonBody } from "@/lib/api/preflight";
 import { greetingRequestSchema, greetingResponseSchema, type StreamMode } from "@/lib/schemas";
 import { getQueueSnapshot } from "@/lib/queue";
-import { GREETING_PROMPT_V1 } from "@/prompts/greeting";
+import { GREETING_PROMPT_V2 } from "@/prompts/greeting";
 import { streamCompletion, INTERRUPTED_NOTICE } from "@/lib/llm";
 
 export const dynamic = "force-dynamic";
@@ -29,7 +29,7 @@ export async function POST(req: Request) {
   let mode: StreamMode = "degraded";
 
   try {
-    const { system, messages } = GREETING_PROMPT_V1.build(queue);
+    const { system, messages } = GREETING_PROMPT_V2.build(queue);
     // Room for reasoning models (e.g. gpt-oss), whose thinking counts toward
     // the limit; the prompt itself keeps the greeting to 1-2 sentences.
     const result = await streamCompletion({ system, messages, maxTokens: 400 });

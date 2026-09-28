@@ -2,7 +2,7 @@ import { preflight, parseJsonBody } from "@/lib/api/preflight";
 import { respondStream } from "@/lib/api/respondStream";
 import { chatRequestSchema, chatStructuredSchema } from "@/lib/schemas";
 import { getQueueSnapshot } from "@/lib/queue";
-import { CHAT_PROMPT_V1 } from "@/prompts/chat";
+import { CHAT_PROMPT_V2 } from "@/prompts/chat";
 import { checkChatAgainstQueue } from "@/lib/structuredChecks";
 
 export const dynamic = "force-dynamic";
@@ -16,7 +16,7 @@ export async function POST(req: Request) {
   if (body instanceof Response) return body;
 
   const queue = getQueueSnapshot();
-  const { system, messages } = CHAT_PROMPT_V1.build(queue, body.history, body.message);
+  const { system, messages } = CHAT_PROMPT_V2.build(queue, body.history, body.message);
 
   return respondStream({
     system,

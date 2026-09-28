@@ -1,5 +1,5 @@
 import { queueBlock, extractQueue } from "@/prompts/context";
-import { SUMMARY_PROMPT_V1 } from "@/prompts/summary";
+import { SUMMARY_PROMPT_V2 } from "@/prompts/summary";
 import type { ApprovalItem } from "@/lib/queue";
 
 /**
@@ -40,7 +40,7 @@ describe("queueBlock", () => {
   });
 
   it("is what every prompt embeds (checked via the summary prompt)", () => {
-    const { system } = SUMMARY_PROMPT_V1.build([item("late", 70, 24)], "en");
+    const { system } = SUMMARY_PROMPT_V2.build([item("late", 70, 24)], "en");
     expect(system).toContain("overdue by 46h");
   });
 });
