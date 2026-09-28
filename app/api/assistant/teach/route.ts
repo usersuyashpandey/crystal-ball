@@ -2,7 +2,7 @@ import { preflight, parseJsonBody } from "@/lib/api/preflight";
 import { respondStream } from "@/lib/api/respondStream";
 import { teachRequestSchema, teachStructuredSchema } from "@/lib/schemas";
 import { getQueueSnapshot } from "@/lib/queue";
-import { TEACH_PROMPT_V2 } from "@/prompts/teach";
+import { TEACH_PROMPT_V3 } from "@/prompts/teach";
 
 export const dynamic = "force-dynamic";
 
@@ -15,7 +15,7 @@ export async function POST(req: Request) {
   if (body instanceof Response) return body;
 
   const queue = getQueueSnapshot();
-  const { system, messages } = TEACH_PROMPT_V2.build(queue, body.history, body.message);
+  const { system, messages } = TEACH_PROMPT_V3.build(queue, body.history, body.message);
 
   return respondStream({
     system,

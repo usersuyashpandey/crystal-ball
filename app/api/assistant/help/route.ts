@@ -2,7 +2,7 @@ import { preflight, parseJsonBody } from "@/lib/api/preflight";
 import { respondStream } from "@/lib/api/respondStream";
 import { helpRequestSchema, helpStructuredSchema } from "@/lib/schemas";
 import { retrieveChunks } from "@/lib/rag";
-import { HELP_PROMPT_V2 } from "@/prompts/help";
+import { HELP_PROMPT_V3 } from "@/prompts/help";
 import { checkHelpAgainstRetrieval } from "@/lib/structuredChecks";
 
 export const dynamic = "force-dynamic";
@@ -16,7 +16,7 @@ export async function POST(req: Request) {
   if (body instanceof Response) return body;
 
   const chunks = retrieveChunks(body.question);
-  const { system, messages } = HELP_PROMPT_V2.build(body.question, chunks);
+  const { system, messages } = HELP_PROMPT_V3.build(body.question, chunks);
 
   return respondStream({
     system,

@@ -4,11 +4,12 @@ import { STRUCTURED_DELIMITER } from "@/lib/llm/streamSplitter";
 import { ASSISTANT_PERSONA, promptKindTag, queueBlock } from "./context";
 
 /** "Talk to me" — free-form, multi-turn conversation about the queue. */
-export const CHAT_PROMPT_V2 = {
-  version: 2,
-  // v2: shared context now states the current time and each item's
-  // server-computed SLA status; light-formatting rule in the persona.
-  // v1 is in git history (before eb4ddff).
+export const CHAT_PROMPT_V3 = {
+  version: 3,
+  // v3: shared persona carries PRIORITY_RULE (safety-critical first), so
+  //     every prompt ranks the same way as the summary.
+  // v2: current time + server-computed SLA status; light formatting.
+  // Earlier versions are in git history.
   kind: "chat",
   build(
     queue: ApprovalItem[],

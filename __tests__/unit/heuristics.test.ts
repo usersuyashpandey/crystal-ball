@@ -51,4 +51,22 @@ describe("computeHeuristicAlerts", () => {
     const queue = [item({ id: "x" }), item({ id: "y" }), item({ id: "z" })];
     expect(computeHeuristicAlerts(queue)).toHaveLength(3);
   });
+
+  it("within the same urgency, an overdue safety-critical item outranks an overdue customer-facing one (policy order)", () => {
+    const ago = (h: number) => new Date(Date.now() - h * 3_600_000).toISOString();
+    const queue = [
+      item({ id: "drone", flags: ["customer-facing"], slaHours: 48, submittedAt: ago(51) }),
+      item({ id: "safety", flags: ["safety-critical"], slaHours: 24, submittedAt: ago(70) }),
+    ];
+    expect(computeHeuristicAlerts(queue).map((a) => a.itemId)).toEqual(["safety", "drone"]);
+  });
+
+  it("then ranks more-overdue items first among equals", () => {
+    const ago = (h: number) => new Date(Date.now() - h * 3_600_000).toISOString();
+    const queue = [
+      item({ id: "a-bit-late", slaHours: 24, submittedAt: ago(26) }),
+      item({ id: "very-late", slaHours: 24, submittedAt: ago(60) }),
+    ];
+    expect(computeHeuristicAlerts(queue).map((a) => a.itemId)).toEqual(["very-late", "a-bit-late"]);
+  });
 });

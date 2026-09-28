@@ -120,7 +120,7 @@ npm run build
   `content/approval-policy.md`, following the brief's "keyword retrieval
   over 3-5 chunks is sufficient". No embeddings.
 - **Prompt versioning:** `prompts/*.ts`, versioned exports
-  (`SUMMARY_PROMPT_V2`, …), not inline strings. The shared queue block
+  (`SUMMARY_PROMPT_V3`, …), not inline strings. The shared queue block
   states the current time and each item's `hoursPending` / `slaStatus`,
   computed server-side, so the model never does date arithmetic.
 - **Rendering model text:** `components/RichText.tsx` shows the light
