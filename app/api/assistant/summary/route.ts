@@ -3,6 +3,7 @@ import { respondStream } from "@/lib/api/respondStream";
 import { summaryRequestSchema, summaryStructuredSchema } from "@/lib/schemas";
 import { getQueueSnapshot } from "@/lib/queue";
 import { computeHeuristicAlerts } from "@/lib/heuristics";
+import { checkSummaryAgainstQueue } from "@/lib/structuredChecks";
 import { SUMMARY_PROMPT_V1 } from "@/prompts/summary";
 
 export const dynamic = "force-dynamic";
@@ -22,6 +23,7 @@ export async function POST(req: Request) {
     system,
     messages,
     structuredSchema: summaryStructuredSchema,
+    refine: checkSummaryAgainstQueue(queue),
     fallbackStructured: () => ({
       alerts: computeHeuristicAlerts(queue),
       generatedAt: new Date().toISOString(),

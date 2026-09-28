@@ -25,6 +25,18 @@ export type ChatMessage = z.infer<typeof chatMessageSchema>;
 export const streamModeSchema = z.enum(["live", "mock", "degraded"]);
 export type StreamMode = z.infer<typeof streamModeSchema>;
 
+/** Whether the `structured` frame holds the model's (validated) payload or
+ * the route's local fallback. Sent on every `done` frame so a fallback is
+ * never silent — even when mode is "live". */
+export const structuredSourceSchema = z.enum(["model", "fallback"]);
+export type StructuredSource = z.infer<typeof structuredSourceSchema>;
+
+export const doneFrameSchema = z.object({
+  mode: streamModeSchema,
+  structuredSource: structuredSourceSchema,
+});
+export type DoneFrame = z.infer<typeof doneFrameSchema>;
+
 export const errorResponseSchema = z.object({
   error: z.string(),
   message: z.string(),

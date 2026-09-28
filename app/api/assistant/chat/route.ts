@@ -3,6 +3,7 @@ import { respondStream } from "@/lib/api/respondStream";
 import { chatRequestSchema, chatStructuredSchema } from "@/lib/schemas";
 import { getQueueSnapshot } from "@/lib/queue";
 import { CHAT_PROMPT_V1 } from "@/prompts/chat";
+import { checkChatAgainstQueue } from "@/lib/structuredChecks";
 
 export const dynamic = "force-dynamic";
 
@@ -21,6 +22,7 @@ export async function POST(req: Request) {
     system,
     messages,
     structuredSchema: chatStructuredSchema,
+    refine: checkChatAgainstQueue(queue),
     fallbackStructured: () => ({ generatedAt: new Date().toISOString(), referencedItemIds: [] }),
     cookieHeader: pre.cookieHeader,
   });

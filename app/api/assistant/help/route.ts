@@ -3,6 +3,7 @@ import { respondStream } from "@/lib/api/respondStream";
 import { helpRequestSchema, helpStructuredSchema } from "@/lib/schemas";
 import { retrieveChunks } from "@/lib/rag";
 import { HELP_PROMPT_V1 } from "@/prompts/help";
+import { checkHelpAgainstRetrieval } from "@/lib/structuredChecks";
 
 export const dynamic = "force-dynamic";
 
@@ -21,6 +22,7 @@ export async function POST(req: Request) {
     system,
     messages,
     structuredSchema: helpStructuredSchema,
+    refine: checkHelpAgainstRetrieval(chunks),
     fallbackStructured: () => ({
       citations: chunks.map((c) => ({ heading: c.heading, snippet: c.body.slice(0, 160) })),
       grounded: chunks.length > 0,
