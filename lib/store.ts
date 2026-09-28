@@ -62,6 +62,8 @@ interface AssistantStore {
   resetHelp: () => void;
   sendChat: (message: string) => Promise<void>;
   runTeach: (message?: string) => Promise<void>;
+  retryChat: () => Promise<void>;
+  retryTeach: () => Promise<void>;
 }
 
 export const useAssistantStore = create<AssistantStore>((set, get) => ({
@@ -202,5 +204,24 @@ export const useAssistantStore = create<AssistantStore>((set, get) => ({
         onError: (error) => set((s) => ({ teach: { ...s.teach, status: "error", error } })),
       },
     );
+  },
+
+  retryChat: async () => {
+    const { messages } = get().chat;
+    const lastUserIdx = messages.map((m) => m.role).lastIndexOf("user");
+    if (lastUserIdx === -1) return;
+    const content = messages[lastUserIdx].content;
+    set((s) => ({ chat: { ...s.chat, messages: s.chat.messages.slice(0, lastUserIdx), error: null } }));
+    await get().sendChat(content);
+  },
+
+  retryTeach: async () => {
+    const { messages } = get().teach;
+    const lastUserIdx = messages.map((m) => m.role).lastIndexOf("user");
+    set((s) => ({
+      teach: { ...s.teach, messages: lastUserIdx === -1 ? [] : s.teach.messages.slice(0, lastUserIdx), error: null },
+    }));
+    const content = lastUserIdx === -1 ? undefined : messages[lastUserIdx].content;
+    await get().runTeach(content);
   },
 }));
