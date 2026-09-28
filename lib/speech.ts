@@ -83,10 +83,12 @@ const KNOWN_GOOD =
   /(google|siri|samantha|daniel|karen|moira|serena|tessa|ava|zoe|allison|aria|jenny|guy|sonia|libby|lekha|rishi|veena|neel)/i;
 
 /**
- * Picks the voice most likely to sound good for `lang`: an exact language
- * match beats a same-language/other-region match, which beats nothing;
- * within that, premium/neural voices and known-good names win. Returns
- * null if nothing speaks the language (the browser then chooses by `lang`).
+ * Picks the voice most likely to sound good for `lang`. Only voices in the
+ * same language are considered; among those, quality (premium/neural
+ * voices, Google's network voices, known-good system voices) outweighs an
+ * exact region match, which only breaks ties. Novelty voices are never
+ * chosen while anything else exists. Returns null if nothing speaks the
+ * language, so the browser chooses by `lang` itself.
  */
 export function pickVoice<V extends VoiceLike>(voices: V[], lang: string): V | null {
   const wanted = lang.toLowerCase().replace("_", "-");
@@ -97,13 +99,14 @@ export function pickVoice<V extends VoiceLike>(voices: V[], lang: string): V | n
 
   for (const voice of voices) {
     const voiceLang = voice.lang.toLowerCase().replace("_", "-");
-    let score = 0;
-    if (voiceLang === wanted) score += 100;
-    else if (voiceLang.split("-")[0] === base) score += 50;
-    else continue; // wrong language: never better than letting the browser pick
+    if (voiceLang.split("-")[0] !== base) continue;
+
+    let score = 50;
+    if (voiceLang === wanted) score += 15;
     if (NOVELTY.test(voice.name)) score -= 1000;
-    if (HIGH_QUALITY.test(voice.name)) score += 10;
-    if (KNOWN_GOOD.test(voice.name)) score += 5;
+    if (HIGH_QUALITY.test(voice.name)) score += 30;
+    if (/google/i.test(voice.name)) score += 20;
+    if (KNOWN_GOOD.test(voice.name)) score += 10;
     if (voice.default) score += 1;
 
     if (score > bestScore) {
