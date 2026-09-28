@@ -148,3 +148,69 @@ describe("ApprovalsAssistantPanel", () => {
     await waitFor(() => expect(input).not.toBeDisabled());
   });
 });
+
+describe("ApprovalsAssistantPanel — header controls and footer (reference panel parity)", () => {
+  it("has info, expand and close controls in the header", async () => {
+    await openPanel();
+    const dialog = screen.getByRole("dialog");
+
+    expect(dialog).toHaveAttribute("data-expanded", "false");
+    fireEvent.click(screen.getByLabelText("Expand assistant"));
+    expect(dialog).toHaveAttribute("data-expanded", "true");
+    fireEvent.click(screen.getByLabelText("Collapse assistant"));
+    expect(dialog).toHaveAttribute("data-expanded", "false");
+
+    fireEvent.click(screen.getByLabelText("About this assistant"));
+    expect(screen.getByTestId("assistant-info")).toHaveTextContent(/approval-policy/i);
+
+    fireEvent.click(screen.getByLabelText("Close assistant"));
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+  });
+
+  it("shows the pending item count in the footer", async () => {
+    await openPanel();
+    expect(screen.getByTestId("assistant-footer")).toHaveTextContent("4 items pending");
+  });
+});
+
+describe("ApprovalsAssistantPanel — read the summary aloud", () => {
+  async function finishSummary() {
+    const sse = controllableSse();
+    onRequest("/api/assistant/summary", () => sse.response);
+    await openPanel();
+    fireEvent.click(screen.getByText("Present me Summary"));
+    await act(async () => {
+      sse.frame("token", { text: "Clear the safety PDF first." });
+      sse.frame("structured", { alerts: [], generatedAt: "t" });
+      sse.frame("done", { mode: "mock", structuredSource: "model" });
+      sse.close();
+    });
+    await screen.findByText("Clear the safety PDF first.");
+  }
+
+  it("speaks the finished narrative in the operator's language when speech is supported", async () => {
+    const speak = vi.fn();
+    vi.stubGlobal("speechSynthesis", { speak, cancel: vi.fn(), speaking: false });
+    vi.stubGlobal(
+      "SpeechSynthesisUtterance",
+      class {
+        lang = "";
+        constructor(public text: string) {}
+      },
+    );
+
+    await finishSummary();
+    fireEvent.click(screen.getByText("Read aloud"));
+
+    expect(speak).toHaveBeenCalledTimes(1);
+    const utterance = speak.mock.calls[0][0] as { text: string; lang: string };
+    expect(utterance.text).toBe("Clear the safety PDF first.");
+    expect(utterance.lang).toBe(navigator.language);
+  });
+
+  it("hides the button when the browser has no speech synthesis", async () => {
+    vi.stubGlobal("speechSynthesis", undefined);
+    await finishSummary();
+    expect(screen.queryByText("Read aloud")).not.toBeInTheDocument();
+  });
+});
