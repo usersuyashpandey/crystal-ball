@@ -72,6 +72,21 @@ describe("pickVoice", () => {
     expect(pickVoice(voices, "en-US")?.name).toBe("Karen");
   });
 
+  it("prefers a natural voice in the same language over an older exact-region one (en-IN on a Mac + Chrome)", () => {
+    const voices = [
+      v("Rishi", "en-IN"),
+      v("Aman", "en-IN"),
+      v("Google US English", "en-US", { localService: false }),
+      v("Google UK English Female", "en-GB", { localService: false }),
+    ];
+    expect(pickVoice(voices, "en-IN")?.name).toMatch(/^Google/);
+  });
+
+  it("still prefers the operator's region when quality is comparable", () => {
+    const voices = [v("Samantha", "en-US"), v("Daniel", "en-GB")];
+    expect(pickVoice(voices, "en-GB")?.name).toBe("Daniel");
+  });
+
   it("returns null when no voices are loaded yet", () => {
     expect(pickVoice([], "en-US")).toBeNull();
   });

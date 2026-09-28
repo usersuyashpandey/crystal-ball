@@ -7,6 +7,7 @@ import { StreamingAnswer } from "./StreamingAnswer";
 import { ChatThread } from "./ChatThread";
 import { UrgencyBadge } from "./UrgencyBadge";
 import { ModeBadge } from "./ModeBadge";
+import { pickVoice, splitIntoSentences, toSpeakableText } from "@/lib/speech";
 
 const ACTIONS: { view: AssistantView; icon: string; title: string; subtitle: string }[] = [
   { view: "summary", icon: "\u{1F4CB}", title: "Present me Summary", subtitle: "Prioritized overview of the queue" },
@@ -352,15 +353,27 @@ function FallbackNote({ children }: { children: ReactNode }) {
 
 /**
  * "Present me Summary ... out loud/in text" (brief §1): the Web Speech API,
- * in the operator's browser language. Rendered only where the browser
+ * in the operator's browser language, using the best installed voice and
+ * text rewritten for speech, one sentence per utterance (lib/speech.ts). Rendered only where the browser
  * supports speech synthesis; this view is never server-rendered, so
  * checking the global during render can't cause a hydration mismatch.
  */
 function ReadAloudButton({ text }: { text: string }) {
   const [speaking, setSpeaking] = useState(false);
+  const [voices, setVoices] = useState<SpeechSynthesisVoice[]>([]);
   const synth = (globalThis as { speechSynthesis?: SpeechSynthesis }).speechSynthesis;
 
-  useEffect(() => () => synth?.cancel(), [synth]);
+  // Browsers load voices asynchronously; getVoices() is often empty at first.
+  useEffect(() => {
+    if (!synth?.getVoices) return;
+    const load = () => setVoices(synth.getVoices());
+    load();
+    synth.addEventListener?.("voiceschanged", load);
+    return () => {
+      synth.removeEventListener?.("voiceschanged", load);
+      synth.cancel();
+    };
+  }, [synth]);
 
   if (!synth || typeof SpeechSynthesisUtterance === "undefined" || !text.trim()) return null;
 
@@ -370,12 +383,21 @@ function ReadAloudButton({ text }: { text: string }) {
       setSpeaking(false);
       return;
     }
-    const utterance = new SpeechSynthesisUtterance(text);
-    utterance.lang = navigator.language;
-    utterance.onend = () => setSpeaking(false);
-    utterance.onerror = () => setSpeaking(false);
+    const lang = navigator.language;
+    const voice = pickVoice(voices, lang);
+    const sentences = splitIntoSentences(toSpeakableText(text));
+    if (sentences.length === 0) return;
+
     synth!.cancel();
-    synth!.speak(utterance);
+    sentences.forEach((sentence, i) => {
+      const utterance = new SpeechSynthesisUtterance(sentence);
+      if (voice) utterance.voice = voice;
+      utterance.lang = voice?.lang ?? lang;
+      utterance.rate = 0.95;
+      utterance.onerror = () => setSpeaking(false);
+      if (i === sentences.length - 1) utterance.onend = () => setSpeaking(false);
+      synth!.speak(utterance);
+    });
     setSpeaking(true);
   }
 
@@ -385,3 +407,4 @@ function ReadAloudButton({ text }: { text: string }) {
     </button>
   );
 }
+
