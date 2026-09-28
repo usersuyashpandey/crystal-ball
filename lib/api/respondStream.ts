@@ -2,6 +2,7 @@ import type { z } from "zod";
 import type { LLMMessage } from "@/lib/llm/types";
 import { streamCompletion } from "@/lib/llm";
 import { StructuredStreamSplitter } from "@/lib/llm/streamSplitter";
+import { extractJsonObject } from "@/lib/llm/extractJson";
 import { sseFrame, SSE_HEADERS } from "@/lib/sse";
 
 export interface RespondStreamArgs<TStructured> {
@@ -58,7 +59,7 @@ export function respondStream<TStructured>({
         });
 
         const { structuredRaw } = splitter.finalize();
-        const parsedRaw = structuredRaw ? safeJsonParse(structuredRaw) : null;
+        const parsedRaw = structuredRaw ? extractJsonObject(structuredRaw) : null;
         const validated = parsedRaw ? structuredSchema.safeParse(parsedRaw) : null;
         const structured = validated?.success ? validated.data : fallbackStructured();
 
@@ -82,12 +83,4 @@ export function respondStream<TStructured>({
   if (cookieHeader) headers.append("Set-Cookie", cookieHeader);
 
   return new Response(stream, { status: 200, headers });
-}
-
-function safeJsonParse(raw: string): unknown {
-  try {
-    return JSON.parse(raw);
-  } catch {
-    return null;
-  }
 }
