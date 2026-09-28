@@ -28,8 +28,8 @@ npm run dev                  # http://localhost:3000
 ### Running without an API key
 
 The app works with **no API key at all**. `lib/llm/index.ts` picks a
-provider in this order: `ANTHROPIC_API_KEY` → `OPENAI_API_KEY` → **offline
-mock provider**. The mock isn't placeholder text: it reads the same
+provider in this order: `ANTHROPIC_API_KEY` → `OPENAI_API_KEY` →
+`GEMINI_API_KEY` → **offline mock provider**. The mock isn't placeholder text: it reads the same
 `<queue>`/`<policy>` context every real prompt embeds (`prompts/context.ts`)
 and answers from the actual fixture data, streamed word by word so the
 token-by-token UI is exercised either way.
@@ -39,9 +39,21 @@ A badge under each answer (`ModeBadge`) shows which path served it:
 answered but its structured part was unusable, a note says the list or
 citations are the built-in fallback.
 
-To use a real model, set `ANTHROPIC_API_KEY` (default model
-`claude-sonnet-5-5`, override with `ANTHROPIC_MODEL`) or `OPENAI_API_KEY`
-(default `gpt-4o`, override with `OPENAI_MODEL`) in `.env.local`.
+To use a real model, set one key in `.env.local`:
+
+- `ANTHROPIC_API_KEY`: Claude, default `claude-sonnet-5-5`
+  (`ANTHROPIC_MODEL` to override). The brief's primary option.
+- `OPENAI_API_KEY`: GPT-4o by default (`OPENAI_MODEL`).
+- `GEMINI_API_KEY`: Google Gemini, default `gemini-3.8-flash`
+  (`GEMINI_MODEL`). The brief doesn't name Gemini; it's included because
+  its free tier needs no card, which makes it the easy way to try the app
+  against a real model. Get a key at https://aistudio.google.com/apikey.
+
+The automatic order is Anthropic → OpenAI → Gemini → mock. Set
+`LLM_PROVIDER` (`anthropic` | `openai` | `gemini` | `mock`) to force one,
+for example when an Anthropic key is present but has no credit. If a live
+call fails, the server logs the provider and its error message, never the
+key, so "Degraded fallback" in the panel always has a visible cause.
 
 ### Tests
 
@@ -53,7 +65,7 @@ npm run typecheck
 npm run build
 ```
 
-84 tests, all passing: 59 under Jest, 25 under Vitest.
+109 tests, all passing: 82 under Jest, 27 under Vitest.
 
 ## Architecture
 
@@ -77,8 +89,9 @@ npm run build
   brief allows these in place of Express.
 - **API contract:** Zod schemas in `lib/schemas.ts` are the source of
   truth; `openapi.yaml` is a hand-written mirror of them.
-- **LLM integration:** `lib/llm/`: one `LLMProvider` interface with three
-  implementations (Anthropic, OpenAI, offline mock). Called server-side
+- **LLM integration:** `lib/llm/`: one `LLMProvider` interface. Anthropic
+  uses its own SDK; OpenAI and Gemini share one OpenAI-compatible
+  implementation; the offline mock is the fallback. Called server-side
   only; keys never reach the client.
 - **Structured output:** each prompt asks for a short narrative, a
   `<<<STRUCTURED>>>` marker, then one JSON object. That's a single
@@ -111,8 +124,10 @@ Jest:
 - **Unit** (`__tests__/unit`): `streamCompletion()` with the LLM provider
   mocked: `live`/`mock`/`degraded` selection, never throws, first-token
   and idle timeouts, a provider that ignores the abort signal, late tokens
-  dropped. Also the splitter, JSON extraction, retrieval, heuristics, rate
-  limiting and preflight.
+  dropped, provider selection and `LLM_PROVIDER`, failures logged without
+  the key. Also the Gemini provider (OpenAI SDK mocked), the splitter, JSON
+  extraction, retrieval, heuristics, rate limiting, preflight, and the
+  read-aloud helpers.
 - **Integration** (`__tests__/integration`), via **Supertest**:
   `helpers/routeServer.ts` mounts an App Router handler on a real Node
   `http.Server` and streams its response back, so tests go over a socket.

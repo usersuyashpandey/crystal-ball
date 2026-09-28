@@ -1,34 +1,9 @@
-import OpenAI from "openai";
-import type { LLMProvider, StreamCompleteOptions } from "../types";
+import { createOpenAICompatibleProvider } from "./openaiCompatible";
 
-const DEFAULT_MODEL = "gpt-4o";
-
-let client: OpenAI | null = null;
-function getClient(): OpenAI {
-  if (!client) {
-    client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
-  }
-  return client;
-}
-
-export const openaiProvider: LLMProvider = {
+/** GPT-4o by default (the brief's alternative to Claude). */
+export const openaiProvider = createOpenAICompatibleProvider({
   name: "openai",
-  async streamComplete({ system, messages, maxTokens = 1024, onToken, signal }: StreamCompleteOptions) {
-    const stream = getClient().chat.completions.stream(
-      {
-        model: process.env.OPENAI_MODEL ?? DEFAULT_MODEL,
-        max_tokens: maxTokens,
-        messages: [
-          { role: "system", content: system },
-          ...messages.map((m) => ({ role: m.role, content: m.content }) as const),
-        ],
-      },
-      { signal },
-    );
-
-    stream.on("content", (delta) => onToken(delta));
-
-    const fullText = (await stream.finalContent()) ?? "";
-    return { fullText };
-  },
-};
+  apiKeyEnv: "OPENAI_API_KEY",
+  modelEnv: "OPENAI_MODEL",
+  defaultModel: "gpt-4o",
+});
