@@ -1,105 +1,68 @@
 /**
- * Integration test for POST /api/assistant/summary.
+ * Integration tests for POST /api/assistant/summary, via Supertest.
  *
- * The brief asks for a Supertest test against an AI endpoint. Supertest
- * needs an http.Server to attach to; a Next.js App Router route handler is
- * just an exported `(req: Request) => Response` function with no server of
- * its own to boot in a test (see README's "Testing" section for the fuller
- * version of this note, per the brief's own "say so explicitly" guidance
- * when substituting a listed tool). So this test does the equivalent thing
- * the standard way for this framework: construct a real Fetch API Request,
- * call the exported handler directly, and assert on the real Response —
- * same request/response contract Supertest would exercise, no bespoke
- * mocking of Next internals required.
+ * Next.js App Router handlers have no server of their own, so
+ * helpers/routeServer.ts mounts the exported POST on a real Node
+ * http.Server and Supertest talks to it over a socket — the same
+ * request/response path a browser takes, SSE streaming included.
  *
- * Covers both paths the brief calls out: the success path (offline mock
- * provider, since no API key is set in the test env) and the
- * fallback/timeout path (a configured provider that fails outright).
+ * Covers the brief's two required paths: success (offline mock provider,
+ * no API key in the test env) and fallback (a configured provider that
+ * fails outright), plus request validation.
  */
-
-export {}; // no top-level imports otherwise — force module scope, not global
-
-interface SseFrame {
-  event: string;
-  data: Record<string, unknown>;
-}
-
-function parseSse(text: string): SseFrame[] {
-  return text
-    .split("\n\n")
-    .filter((f) => f.trim().length > 0)
-    .map((frame) => {
-      const eventLine = frame.split("\n").find((l) => l.startsWith("event: ")) ?? "";
-      const dataLine = frame.split("\n").find((l) => l.startsWith("data: ")) ?? "";
-      return {
-        event: eventLine.replace("event: ", "").trim(),
-        data: JSON.parse(dataLine.replace("data: ", "")),
-      };
-    });
-}
-
-function buildRequest(body: unknown = {}): Request {
-  return new Request("http://localhost/api/assistant/summary", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(body),
-  });
-}
+import request from "supertest";
+import { serveRoute } from "../helpers/routeServer";
+import { parseSse, summarize } from "../helpers/sse";
 
 const ORIGINAL_ENV = { ...process.env };
+
+async function server() {
+  const { POST } = await import("@/app/api/assistant/summary/route");
+  return serveRoute(POST);
+}
 
 describe("POST /api/assistant/summary", () => {
   beforeEach(() => {
     process.env = { ...ORIGINAL_ENV };
     delete process.env.ANTHROPIC_API_KEY;
     delete process.env.OPENAI_API_KEY;
-    // Every test dynamically imports the route handler fresh after this,
-    // which re-evaluates lib/rateLimit.ts (and every other module) from
-    // scratch — that's what gives each test its own clean in-memory rate
-    // limit store, not an explicit reset call.
+    // Each test imports the route fresh, so module state (incl. the
+    // in-memory rate limiter) doesn't leak between tests.
     jest.resetModules();
   });
 
-  it("success path: streams a narrative and a Zod-valid structured alert per queue item", async () => {
-    const { POST } = await import("@/app/api/assistant/summary/route");
-    const res = await POST(buildRequest());
+  it("success path: streams a narrative, then a valid structured alert per queue item, then done", async () => {
+    const res = await request(await server())
+      .post("/api/assistant/summary")
+      .send({})
+      .expect(200)
+      .expect("content-type", /text\/event-stream/);
 
-    expect(res.status).toBe(200);
-    expect(res.headers.get("content-type")).toContain("text/event-stream");
+    const frames = parseSse(res.text);
+    expect(frames[0].event).toBe("token"); // narrative streams first
+    expect(frames.at(-1)?.event).toBe("done"); // and done is always last
 
-    const frames = parseSse(await res.text());
-    const tokenFrames = frames.filter((f) => f.event === "token");
-    const structured = frames.find((f) => f.event === "structured");
-    const done = frames.find((f) => f.event === "done");
+    const { narrative, structured, done } = summarize(frames);
+    expect(narrative.length).toBeGreaterThan(0);
+    expect(narrative).not.toContain("<<<STRUCTURED>>>");
+    expect(done).toEqual({ mode: "mock", structuredSource: "model" });
 
-    expect(tokenFrames.length).toBeGreaterThan(0);
-    expect(done?.data.mode).toBe("mock");
-
-    // The structured payload is exactly what the client trusts without
-    // re-validating — assert it's actually shaped right, not just present.
-    const alerts = structured?.data.alerts as Array<{ itemId: string; urgency: string }>;
-    expect(alerts).toBeDefined();
-    expect(alerts.length).toBeGreaterThan(0);
-    for (const alert of alerts) {
-      expect(["high", "medium", "low"]).toContain(alert.urgency);
-    }
+    const alerts = structured!.alerts as Array<{ itemId: string; urgency: string }>;
+    expect(alerts).toHaveLength(4);
+    for (const alert of alerts) expect(["high", "medium", "low"]).toContain(alert.urgency);
   });
 
-  it("rejects a malformed request body with 400 before touching the LLM layer", async () => {
-    const { POST } = await import("@/app/api/assistant/summary/route");
-    const res = await POST(
-      new Request("http://localhost/api/assistant/summary", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ language: 1 }), // wrong type
-      }),
-    );
-    expect(res.status).toBe(400);
-    const body = await res.json();
-    expect(body.error).toBe("invalid_request");
+  it("sets a session cookie for rate limiting on first contact", async () => {
+    const res = await request(await server()).post("/api/assistant/summary").send({});
+    expect(res.headers["set-cookie"]?.[0]).toMatch(/^cb_session=/);
   });
 
-  it("fallback path: a failing configured provider still returns 200 with a usable structured payload", async () => {
+  it("rejects a malformed body with 400 before touching the LLM layer", async () => {
+    const res = await request(await server()).post("/api/assistant/summary").send({ language: 1 }).expect(400);
+    expect(res.body.error).toBe("invalid_request");
+  });
+
+  it("fallback path: a failing provider still returns 200 with a usable payload, marked degraded", async () => {
     process.env.ANTHROPIC_API_KEY = "test-key";
     jest.doMock("@/lib/llm/providers/anthropic", () => ({
       anthropicProvider: {
@@ -108,25 +71,15 @@ describe("POST /api/assistant/summary", () => {
       },
     }));
 
-    const { POST } = await import("@/app/api/assistant/summary/route");
-    const res = await POST(buildRequest());
+    // The brief's bar: killing the API key or forcing a timeout must not
+    // break the UI — never a raw 500, never a hung stream.
+    const res = await request(await server()).post("/api/assistant/summary").send({}).expect(200);
+    const { structured, done } = summarize(parseSse(res.text));
 
-    // The brief's own bar: "Killing your API key or forcing a timeout
-    // doesn't break the UI" — never a raw 500, never a hung stream.
-    expect(res.status).toBe(200);
-
-    const frames = parseSse(await res.text());
-    const done = frames.find((f) => f.event === "done");
-    const structured = frames.find((f) => f.event === "structured");
-
-    expect(done?.data.mode).toBe("degraded");
-    expect(Array.isArray(structured?.data.alerts)).toBe(true);
-    expect((structured?.data.alerts as unknown[]).length).toBeGreaterThan(0);
+    expect(done?.mode).toBe("degraded");
+    expect((structured!.alerts as unknown[]).length).toBe(4);
   });
 });
 
-// Rate limiting itself (the sliding-window logic) is covered by a fast,
-// deterministic unit test against checkRateLimit directly rather than by
-// driving 30+ real streamed responses through this route — see
-// __tests__/unit/rateLimit.test.ts. Exercising it here would mostly be a
-// slow way to re-test lib/rateLimit.ts's own logic.
+// The sliding-window logic itself is unit-tested (unit/rateLimit.test.ts,
+// unit/preflight.test.ts) rather than by driving 30+ streamed responses here.

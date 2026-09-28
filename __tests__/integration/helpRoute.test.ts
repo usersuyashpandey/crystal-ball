@@ -1,33 +1,17 @@
 /**
- * Second AI endpoint covered at the integration level — see
- * summaryRoute.test.ts for the fuller explanation of the testing approach
- * (direct route handler invocation in place of Supertest). This one
- * exercises the RAG-grounding path specifically: a question the policy doc
- * covers vs. one it doesn't.
+ * Integration tests for POST /api/assistant/help (RAG), via Supertest —
+ * see summaryRoute.test.ts for how the route is served.
  */
-
-export {}; // no top-level imports otherwise — force module scope, not global
-
-interface SseFrame {
-  event: string;
-  data: Record<string, unknown>;
-}
-
-function parseSse(text: string): SseFrame[] {
-  return text
-    .split("\n\n")
-    .filter((f) => f.trim().length > 0)
-    .map((frame) => {
-      const eventLine = frame.split("\n").find((l) => l.startsWith("event: ")) ?? "";
-      const dataLine = frame.split("\n").find((l) => l.startsWith("data: ")) ?? "";
-      return {
-        event: eventLine.replace("event: ", "").trim(),
-        data: JSON.parse(dataLine.replace("data: ", "")),
-      };
-    });
-}
+import request from "supertest";
+import { serveRoute } from "../helpers/routeServer";
+import { parseSse, summarize } from "../helpers/sse";
 
 const ORIGINAL_ENV = { ...process.env };
+
+async function ask(question: string) {
+  const { POST } = await import("@/app/api/assistant/help/route");
+  return request(serveRoute(POST)).post("/api/assistant/help").send({ question });
+}
 
 describe("POST /api/assistant/help", () => {
   beforeEach(() => {
@@ -38,37 +22,21 @@ describe("POST /api/assistant/help", () => {
   });
 
   it("grounds an answer in the policy doc for a question it covers", async () => {
-    const { POST } = await import("@/app/api/assistant/help/route");
-    const req = new Request("http://localhost/api/assistant/help", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ question: "Who has to approve a safety-critical PDF?" }),
-    });
-
-    const res = await POST(req);
+    const res = await ask("Who has to approve a safety-critical PDF?");
     expect(res.status).toBe(200);
-
-    const frames = parseSse(await res.text());
-    const structured = frames.find((f) => f.event === "structured");
-    expect(structured?.data.grounded).toBe(true);
-    expect((structured?.data.citations as unknown[]).length).toBeGreaterThan(0);
+    const { structured } = summarize(parseSse(res.text));
+    expect(structured?.grounded).toBe(true);
+    expect((structured?.citations as { heading: string }[]).map((c) => c.heading)).toContain("Approval authority");
   });
 
   it("reports ungrounded, without inventing an answer, for a question the policy doesn't cover", async () => {
-    const { POST } = await import("@/app/api/assistant/help/route");
-    const req = new Request("http://localhost/api/assistant/help", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ question: "What's the best pizza topping?" }),
-    });
-
-    const res = await POST(req);
-    const frames = parseSse(await res.text());
-    const structured = frames.find((f) => f.event === "structured");
-    expect(structured?.data.grounded).toBe(false);
+    const res = await ask("What's the best pizza topping?");
+    const { structured } = summarize(parseSse(res.text));
+    expect(structured?.grounded).toBe(false);
+    expect(structured?.citations).toEqual([]);
   });
 
-  it("fallback path: degrades to a valid structured payload when the configured provider fails", async () => {
+  it("fallback path: degrades to retrieval-derived citations when the provider fails", async () => {
     process.env.ANTHROPIC_API_KEY = "test-key";
     jest.doMock("@/lib/llm/providers/anthropic", () => ({
       anthropicProvider: {
@@ -77,34 +45,17 @@ describe("POST /api/assistant/help", () => {
       },
     }));
 
-    const { POST } = await import("@/app/api/assistant/help/route");
-    const req = new Request("http://localhost/api/assistant/help", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ question: "Who has to approve a safety-critical PDF?" }),
-    });
-
-    const res = await POST(req);
+    const res = await ask("Who has to approve a safety-critical PDF?");
     expect(res.status).toBe(200);
-
-    const frames = parseSse(await res.text());
-    const done = frames.find((f) => f.event === "done");
-    const structured = frames.find((f) => f.event === "structured");
-    expect(done?.data.mode).toBe("degraded");
-    // The route's own fallbackStructured() derives citations from the
-    // retrieval it already did, independent of the model — so even in the
-    // degraded path the citations should still be grounded correctly.
-    expect(structured?.data.grounded).toBe(true);
+    const { structured, done } = summarize(parseSse(res.text));
+    expect(done?.mode).toBe("degraded");
+    // Citations come from our own retrieval, independent of the model, so
+    // they stay correct even when the model is unavailable.
+    expect(structured?.grounded).toBe(true);
   });
 
   it("rejects an empty question with 400", async () => {
-    const { POST } = await import("@/app/api/assistant/help/route");
-    const req = new Request("http://localhost/api/assistant/help", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ question: "" }),
-    });
-    const res = await POST(req);
+    const res = await ask("");
     expect(res.status).toBe(400);
   });
 });

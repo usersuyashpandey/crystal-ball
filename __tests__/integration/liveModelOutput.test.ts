@@ -6,7 +6,9 @@
  * data, or it gets the local fallback AND is told so (structuredSource:
  * "fallback"). Never a silent swap, never invented items.
  */
+import request from "supertest";
 import { parseSse, summarize, mockAnthropicReply } from "../helpers/sse";
+import { serveRoute } from "../helpers/routeServer";
 import { APPROVALS_QUEUE } from "@/lib/queue";
 
 const ORIGINAL_ENV = { ...process.env };
@@ -18,15 +20,9 @@ function alertsFor(ids: string[]) {
 
 async function callRoute(route: "summary" | "help" | "chat", body: unknown) {
   const { POST } = await import(`@/app/api/assistant/${route}/route`);
-  const res: Response = await POST(
-    new Request(`http://localhost/api/assistant/${route}`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(body),
-    }),
-  );
+  const res = await request(serveRoute(POST)).post(`/api/assistant/${route}`).send(body as object);
   expect(res.status).toBe(200);
-  return summarize(parseSse(await res.text()));
+  return summarize(parseSse(res.text));
 }
 
 beforeEach(() => {
