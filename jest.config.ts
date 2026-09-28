@@ -23,6 +23,13 @@ const config: Config = {
       {
         tsconfig: {
           jsx: "react-jsx",
+          // The base tsconfig targets ESM ("module": "esnext") for Next's
+          // own bundler. Jest's runtime needs CommonJS output to run
+          // transformed files and for jest.mock()/jest.doMock() to work
+          // (they patch node's `require`) — override just for this
+          // transform rather than touching the app's own tsconfig.
+          module: "commonjs",
+          moduleResolution: "node",
         },
       },
     ],
