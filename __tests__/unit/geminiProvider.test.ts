@@ -47,7 +47,7 @@ afterAll(() => {
   process.env = { ...ORIGINAL_ENV };
 });
 
-it("calls Google's OpenAI-compatible endpoint with a free-tier Flash model by default", async () => {
+it("calls Google's OpenAI-compatible endpoint with the gemini-flash-latest alias by default", async () => {
   const { geminiProvider } = await import("@/lib/llm/providers/gemini");
   const tokens: string[] = [];
   const result = await geminiProvider.streamComplete({
@@ -58,7 +58,7 @@ it("calls Google's OpenAI-compatible endpoint with a free-tier Flash model by de
   });
 
   expect(constructed[0]).toEqual({ apiKey: "g-key", baseURL: "https://generativelanguage.googleapis.com/v1beta/openai/" });
-  expect(streamCalls[0].model).toBe("gemini-3.8-flash");
+  expect(streamCalls[0].model).toBe("gemini-flash-latest");
   expect(streamCalls[0].messages[0].role).toBe("system");
   expect(tokens.join("")).toBe("Hello from Gemini");
   expect(result.fullText).toBe("Hello from Gemini");
