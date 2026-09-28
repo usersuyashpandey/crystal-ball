@@ -5,7 +5,13 @@ import { mockProvider } from "./providers/mock";
 
 export type { LLMMessage, CompletionResult };
 
-const DEFAULT_TIMEOUT_MS = 8000;
+/** The brief's 8s: how long we'll wait for the model to start answering. */
+export const DEFAULT_TIMEOUT_MS = 8000;
+/** How long a stream that has started may go quiet before we give up on it. */
+export const DEFAULT_IDLE_TIMEOUT_MS = 8000;
+
+export const INTERRUPTED_NOTICE =
+  "\n\n(The live answer was interrupted, so it stops here. Try again for a complete one.)";
 
 function selectConfiguredProvider(): LLMProvider | null {
   if (process.env.ANTHROPIC_API_KEY) return anthropicProvider;
@@ -18,19 +24,24 @@ export interface StreamCompletionArgs {
   messages: LLMMessage[];
   maxTokens?: number;
   onToken?: (delta: string) => void;
+  /** Max wait for the first token. */
   timeoutMs?: number;
+  /** Max gap between tokens once streaming has started. */
+  idleTimeoutMs?: number;
 }
 
 /**
- * The single entry point every route handler calls. Implements the two
- * "Fallback design" requirements from the brief (§3) in one place:
+ * The single entry point every route handler calls; the brief's "Fallback
+ * design" (§3) lives here.
  *
- *  - Every LLM call gets an 8s timeout (default; override per-call).
- *  - Failure or timeout never bubbles up as a raw error — it degrades to
- *    the offline mock provider, which produces a fast, context-grounded
- *    canned response instead of a blank or frozen panel. The caller finds
- *    out via `mode` ("live" | "mock" | "degraded") and can surface that in
- *    the UI, but the stream itself always completes normally.
+ * - No first token within `timeoutMs` (8s), or an error before any output:
+ *   answer from the offline mock provider instead (fast, grounded in the
+ *   same fixture data), mode "degraded".
+ * - Stream starts, then stalls for `idleTimeoutMs` or errors: stop there
+ *   and append a short notice, mode "degraded". We don't append a second,
+ *   unrelated mock answer to a half-finished live one.
+ * - Never throws. The race against our own abort also means a provider
+ *   that ignores the AbortSignal can't hang the request.
  */
 export async function streamCompletion({
   system,
@@ -38,6 +49,7 @@ export async function streamCompletion({
   maxTokens,
   onToken = () => {},
   timeoutMs = DEFAULT_TIMEOUT_MS,
+  idleTimeoutMs = DEFAULT_IDLE_TIMEOUT_MS,
 }: StreamCompletionArgs): Promise<CompletionResult> {
   const provider = selectConfiguredProvider();
 
@@ -53,40 +65,50 @@ export async function streamCompletion({
   }
 
   const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(new Error("llm_timeout")), timeoutMs);
-  let streamedAny = false;
+  let timer = setTimeout(() => controller.abort(new Error("llm_first_token_timeout")), timeoutMs);
+  const abortedPromise = new Promise<never>((_resolve, reject) => {
+    controller.signal.addEventListener("abort", () => reject(controller.signal.reason));
+  });
+  // Nothing may be waiting on it if the provider wins the race.
+  abortedPromise.catch(() => {});
+
+  let streamed = "";
 
   try {
-    const { fullText } = await provider.streamComplete({
-      system,
-      messages,
-      maxTokens,
-      onToken: (delta) => {
-        streamedAny = true;
-        onToken(delta);
-      },
-      signal: controller.signal,
-    });
+    const { fullText } = await Promise.race([
+      provider.streamComplete({
+        system,
+        messages,
+        maxTokens,
+        signal: controller.signal,
+        onToken: (delta) => {
+          if (controller.signal.aborted) return; // late tokens after a timeout
+          clearTimeout(timer);
+          timer = setTimeout(() => controller.abort(new Error("llm_idle_timeout")), idleTimeoutMs);
+          streamed += delta;
+          onToken(delta);
+        },
+      }),
+      abortedPromise,
+    ]);
     return { fullText, mode: "live" };
   } catch {
-    // Graceful degradation: never let a timeout or provider error surface
-    // as a raw 500 or a stream that just stops. Continue (or start) the
-    // response with the offline mock provider's canned-but-grounded output.
-    const notice = streamedAny
-      ? "\n\n_[connection interrupted — finishing from an offline fallback]_\n\n"
-      : "";
-    if (notice) onToken(notice);
+    if (!controller.signal.aborted) controller.abort(new Error("llm_error"));
 
-    const { fullText: fallbackText } = await mockProvider.streamComplete({
+    if (streamed) {
+      onToken(INTERRUPTED_NOTICE);
+      return { fullText: streamed + INTERRUPTED_NOTICE, mode: "degraded" };
+    }
+
+    const { fullText } = await mockProvider.streamComplete({
       system,
       messages,
       maxTokens,
       onToken,
       signal: new AbortController().signal,
     });
-
-    return { fullText: notice + fallbackText, mode: "degraded" };
+    return { fullText, mode: "degraded" };
   } finally {
-    clearTimeout(timeout);
+    clearTimeout(timer);
   }
 }

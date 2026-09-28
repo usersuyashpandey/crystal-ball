@@ -2,7 +2,7 @@ import { preflight, parseJsonBody } from "@/lib/api/preflight";
 import { greetingRequestSchema, greetingResponseSchema, type StreamMode } from "@/lib/schemas";
 import { getQueueSnapshot } from "@/lib/queue";
 import { GREETING_PROMPT_V1 } from "@/prompts/greeting";
-import { streamCompletion } from "@/lib/llm";
+import { streamCompletion, INTERRUPTED_NOTICE } from "@/lib/llm";
 
 export const dynamic = "force-dynamic";
 
@@ -30,8 +30,10 @@ export async function POST(req: Request) {
 
   try {
     const { system, messages } = GREETING_PROMPT_V1.build(queue);
-    const result = await streamCompletion({ system, messages, maxTokens: 120, timeoutMs: 8000 });
-    greeting = result.fullText.trim() || fallbackGreeting;
+    const result = await streamCompletion({ system, messages, maxTokens: 120 });
+    // A half-finished greeting reads worse than the template one.
+    const interrupted = result.fullText.includes(INTERRUPTED_NOTICE.trim());
+    greeting = (!interrupted && result.fullText.trim()) || fallbackGreeting;
     mode = result.mode;
   } catch {
     greeting = fallbackGreeting;
