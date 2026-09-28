@@ -37,7 +37,7 @@ afterEach(() => vi.unstubAllGlobals());
 async function openPanel() {
   onRequest("/api/assistant/greeting", greeting);
   render(<ApprovalsAssistantPanel />);
-  fireEvent.click(screen.getByText("Open Approvals assistant"));
+  fireEvent.click(screen.getByLabelText("Open Approvals assistant"));
   expect(await screen.findByText("Welcome back — 4 items pending.")).toBeInTheDocument();
 }
 
@@ -167,9 +167,16 @@ describe("ApprovalsAssistantPanel — header controls and footer (reference pane
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
   });
 
-  it("shows the pending item count in the footer", async () => {
+  it("has the reference's round floating toggle that opens and closes the panel", async () => {
     await openPanel();
-    expect(screen.getByTestId("assistant-footer")).toHaveTextContent("4 items pending");
+    fireEvent.click(screen.getByTestId("assistant-toggle"));
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    expect(screen.getByTestId("assistant-toggle")).toHaveAccessibleName("Open Approvals assistant");
+  });
+
+  it("shows the item count in the footer, like the reference", async () => {
+    await openPanel();
+    expect(screen.getByTestId("assistant-footer")).toHaveTextContent("4 folders / items");
   });
 });
 
