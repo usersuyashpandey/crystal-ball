@@ -1,67 +1,58 @@
-import { StructuredStreamSplitter, STRUCTURED_DELIMITER } from "@/lib/llm/streamSplitter";
+import { StructuredStreamSplitter, STRUCTURED_MARKER } from "@/lib/llm/streamSplitter";
 
 /**
- * This is the piece that had a real bug during development (see the
- * "prompts/context.ts" extraction regex fix) — not in the splitter itself,
- * but in a sibling piece of the same "narrative + structured JSON" scheme.
- * Locking down the splitter's own boundary handling with direct tests is
- * cheap insurance against that class of bug recurring here too.
+ * The splitter sits between a live model's raw stream and the UI. Real
+ * models don't reproduce formatting instructions exactly, so these tests
+ * use the variations actually seen in practice, not just the ideal form.
  */
 describe("StructuredStreamSplitter", () => {
-  it("forwards narrative tokens and captures the structured tail", () => {
+  function run(chunks: string[]) {
     const tokens: string[] = [];
     const splitter = new StructuredStreamSplitter((t) => tokens.push(t));
-
-    splitter.push("Hello there.");
-    splitter.push(STRUCTURED_DELIMITER);
-    splitter.push('{"alerts":[]}');
-
+    for (const c of chunks) splitter.push(c);
     const result = splitter.finalize();
-    expect(tokens.join("")).toBe("Hello there.");
-    expect(result.narrative).toBe("Hello there.");
-    expect(result.structuredRaw).toBe('{"alerts":[]}');
+    return { shown: tokens.join(""), ...result };
+  }
+
+  it("forwards narrative tokens and captures the structured tail (ideal format)", () => {
+    const r = run(["Hello there.", `\n${STRUCTURED_MARKER}\n`, '{"alerts":[]}']);
+    expect(r.shown).toBe("Hello there.");
+    expect(r.structuredRaw).toBe('{"alerts":[]}');
   });
 
-  it("detects the delimiter even when it's split across multiple chunks", () => {
-    const tokens: string[] = [];
-    const splitter = new StructuredStreamSplitter((t) => tokens.push(t));
-
-    // Split the delimiter itself into three pieces mid-token, the way real
-    // network chunking might.
-    const mid = Math.floor(STRUCTURED_DELIMITER.length / 2);
-    splitter.push("Some narrative text" + STRUCTURED_DELIMITER.slice(0, mid));
-    splitter.push(STRUCTURED_DELIMITER.slice(mid));
-    splitter.push('{"ok":true}');
-
-    const result = splitter.finalize();
-    expect(tokens.join("")).toBe("Some narrative text");
-    expect(result.structuredRaw).toBe('{"ok":true}');
+  it("detects the marker even when it's split across chunks", () => {
+    const mid = Math.floor(STRUCTURED_MARKER.length / 2);
+    const r = run(["Some narrative text\n" + STRUCTURED_MARKER.slice(0, mid), STRUCTURED_MARKER.slice(mid), '\n{"ok":true}']);
+    expect(r.shown).toBe("Some narrative text");
+    expect(r.structuredRaw).toBe('{"ok":true}');
   });
 
-  it("never lets a false substring match (no surrounding newline) split narrative from JSON early", () => {
-    // Regression test for the actual bug found in prompts/context.ts: text
-    // that merely *mentions* the delimiter-like marker shouldn't be treated
-    // as the real boundary. The splitter itself only ever looks for the
-    // exact STRUCTURED_DELIMITER string, so this mostly documents intent.
-    const tokens: string[] = [];
-    const splitter = new StructuredStreamSplitter((t) => tokens.push(t));
-
-    splitter.push("This mentions <<<STRUCTURED>>> inline but not as our delimiter.");
-    const result = splitter.finalize();
-
-    // Without the delimiter's surrounding newlines, nothing switches modes.
-    expect(result.structuredRaw).toBeNull();
-    expect(tokens.join("")).toContain("<<<STRUCTURED>>>");
+  it("detects the marker with no newline after it — JSON must never reach the UI", () => {
+    const r = run(['Drone video first.\n<<<STRUCTURED>>>{"alerts":[]}']);
+    expect(r.shown).toBe("Drone video first.");
+    expect(r.shown).not.toContain("{");
+    expect(r.structuredRaw).toBe('{"alerts":[]}');
   });
 
-  it("treats a response with no delimiter as pure narrative", () => {
+  it("detects the marker with no newline before it", () => {
+    const r = run(['Drone video first. <<<STRUCTURED>>>\n{"alerts":[]}']);
+    expect(r.shown).toBe("Drone video first.");
+    expect(r.structuredRaw).toBe('{"alerts":[]}');
+  });
+
+  it("does not flush a trailing partial marker into the narrative", () => {
     const tokens: string[] = [];
     const splitter = new StructuredStreamSplitter((t) => tokens.push(t));
+    splitter.push("Answer text.\n<<<STRUC");
+    // Mid-stream: nothing that could be the start of the marker is shown yet.
+    expect(tokens.join("")).not.toContain("<<<");
+    splitter.push('TURED>>>\n{"a":1}');
+    expect(splitter.finalize().structuredRaw).toBe('{"a":1}');
+  });
 
-    splitter.push("Just a plain reply, no structured tail.");
-    const result = splitter.finalize();
-
-    expect(result.narrative).toBe("Just a plain reply, no structured tail.");
-    expect(result.structuredRaw).toBeNull();
+  it("treats a response with no marker as pure narrative", () => {
+    const r = run(["Just a plain reply, no structured tail."]);
+    expect(r.shown).toBe("Just a plain reply, no structured tail.");
+    expect(r.structuredRaw).toBeNull();
   });
 });
