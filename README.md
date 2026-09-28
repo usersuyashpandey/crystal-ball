@@ -7,20 +7,15 @@ me**, **Teach me**, and **Replay Greeting**.
 
 ## Scope decision (read this first)
 
-The brief itself warns against doing all five actions shallowly. I went
-with **three actions at full depth, two intentionally lighter**:
+The brief warns against doing all five actions shallowly. I went with
+**three actions at full depth, two intentionally lighter**:
 
 - **Full depth:** Present me Summary, Talk to me, Help me (RAG). These get
-  streaming, structured output, dedicated prompts, and the bulk of the test
-  coverage.
-- **Lighter, but genuinely working:** Teach me and Replay Greeting. Both
-  make real LLM calls and go through the same fallback/timeout machinery —
-  they just got less prompt iteration and less dedicated test coverage,
-  which I'd add first with more time.
-
-This was a conscious trade-off to keep the three "harder" actions
-(streaming state management, RAG grounding, structured JSON validation)
-solid rather than spreading effort thin across all five.
+  streaming, structured output checked against real data, dedicated
+  prompts, and most of the test coverage.
+- **Lighter, but working:** Teach me and Replay Greeting. Both make real
+  LLM calls through the same timeout/fallback path. They got less prompt
+  iteration and fewer dedicated tests.
 
 ## Setup
 
@@ -32,147 +27,165 @@ npm run dev                  # http://localhost:3000
 
 ### Running without an API key
 
-The app works immediately with **no API key at all**. `lib/llm/index.ts`
-picks a provider in this order: `ANTHROPIC_API_KEY` → `OPENAI_API_KEY` →
-**offline mock provider**. The mock isn't a placeholder — it reads the same
+The app works with **no API key at all**. `lib/llm/index.ts` picks a
+provider in this order: `ANTHROPIC_API_KEY` → `OPENAI_API_KEY` → **offline
+mock provider**. The mock isn't placeholder text: it reads the same
 `<queue>`/`<policy>` context every real prompt embeds (`prompts/context.ts`)
-and generates deterministic, grounded responses from the actual fixture
-data, streamed word-by-word so the UI's token-by-token rendering is
-genuinely exercised either way. A small badge in the panel (`ModeBadge`)
-shows whether a given answer came from **Live model**, **Offline mock**, or
-**Degraded fallback**, so it's visible in the UI which path served it.
+and answers from the actual fixture data, streamed word by word so the
+token-by-token UI is exercised either way.
 
-To use a real model, set `ANTHROPIC_API_KEY` (default model:
-`claude-sonnet-5`, override with `ANTHROPIC_MODEL`) or `OPENAI_API_KEY`
+A badge under each answer (`ModeBadge`) shows which path served it:
+**Live model**, **Offline mock**, or **Degraded fallback**. If the model
+answered but its structured part was unusable, a note says the list or
+citations are the built-in fallback.
+
+To use a real model, set `ANTHROPIC_API_KEY` (default model
+`claude-sonnet-5-5`, override with `ANTHROPIC_MODEL`) or `OPENAI_API_KEY`
 (default `gpt-4o`, override with `OPENAI_MODEL`) in `.env.local`.
 
 ### Tests
 
 ```bash
-npm run test        # Jest (unit + integration) then Vitest (component)
-npm run test:unit    # Jest only
+npm test                # Jest (unit + integration), then Vitest (client + component)
+npm run test:unit       # Jest only
 npm run test:component  # Vitest only
 npm run typecheck
 npm run build
 ```
 
-37 tests, all passing: 31 under Jest (unit + integration), 6 under Vitest
-(component). See "Testing" below for what each layer actually covers.
+84 tests, all passing: 59 under Jest, 25 under Vitest.
 
 ## Architecture
 
-- **Frontend:** Next.js 16 (App Router), React 19, TypeScript strict mode,
-  Tailwind. `components/ApprovalsAssistantPanel.tsx` is the panel itself;
-  `components/QueueDashboard.tsx` + `app/page.tsx` are a simplified backdrop
-  (the brief only asks for the panel, not the whole dashboard).
-- **State:** Zustand (`lib/store.ts`) — one store holding panel open/view
-  state and per-action status/narrative/structured/mode. No prop-drilling
-  between the panel and its five views.
-- **Streaming:** hand-rolled SSE over `fetch` + `ReadableStream`
-  (`lib/streamClient.ts` client-side, `lib/api/respondStream.ts`
-  server-side) — not `EventSource`, which can't POST a JSON body (needed
-  for conversation history / questions). Four of the five actions stream;
-  Replay Greeting is short enough to just be a single JSON response.
-- **Backend:** Next.js Route Handlers (`app/api/assistant/*/route.ts`),
-  chosen over a separate Express server since the brief explicitly allows
-  it and it's one fewer moving part for a take-home.
-- **API contract:** Zod schemas (`lib/schemas.ts`) are the source of truth;
-  `openapi.yaml` is a hand-written mirror, per the brief's "OpenAPI-first
-  spirit... doesn't need Swagger UI" note.
-- **LLM integration:** `lib/llm/` — one `LLMProvider` interface, three
-  implementations (Anthropic, OpenAI, offline mock), selected and wrapped
-  with an 8s timeout + graceful degradation in `lib/llm/index.ts`. See
-  "Fallback design" below.
-- **Structured output:** every prompt (`prompts/*.ts`) asks for a short
-  narrative, then an exact delimiter (`lib/llm/streamSplitter.ts`), then one
-  JSON object — a single plain-text completion, no provider-specific
-  JSON-mode or tool-use required, so Anthropic/OpenAI/mock all speak the
-  same format. The JSON half is Zod-validated before it ever reaches the
-  UI; a failed validation falls back to a locally-computed safe value
-  (`lib/heuristics.ts` for Summary, retrieval-derived citations for Help),
-  never raw model text.
-- **RAG:** `lib/rag.ts` — keyword/TF scoring over `content/approval-policy.md`
-  split into five headed sections, per the brief's explicit "keyword
-  retrieval over 3-5 chunks is sufficient" guidance. No pgvector, no
-  embeddings.
-- **Prompt versioning:** `prompts/*.ts`, each a versioned export
-  (`SUMMARY_PROMPT_V1`, etc.) — not inline strings in route handlers.
-- **Rate limiting:** `lib/rateLimit.ts` — an in-memory per-session
-  sliding-window log (30 requests / 5 min), not `express-rate-limit` (no
-  Express here to hang it off). Explicitly not production-grade: it's
-  process-local and resets on restart, which is fine for one instance and
-  would need a shared store (Redis, etc.) behind more than one.
+- **Frontend:** Next.js 16 (App Router), React 19, TypeScript strict,
+  Tailwind. `components/ApprovalsAssistantPanel.tsx` is the panel: header
+  with info / expand / close, the four action cards, Replay Greeting, a
+  footer with the pending count, and read-aloud for the summary (Web Speech
+  API). `components/QueueDashboard.tsx` is a simplified backdrop; the brief
+  only asks for the panel.
+- **State:** Zustand (`lib/store.ts`). Per action: status
+  (idle → loading → streaming → done | error), text, validated structured
+  payload, `mode`, and `structuredSource`. Starting a request aborts any
+  earlier one for the same action, and late tokens from it are ignored.
+- **Streaming:** SSE over `fetch` + `ReadableStream` (`lib/streamClient.ts`,
+  `lib/api/respondStream.ts`) rather than `EventSource`, which can't POST a
+  JSON body. Frames: `token`*, `structured`, `done { mode,
+  structuredSource }`. A stream that closes without `done` is treated as an
+  error, so the UI can't sit in "streaming" forever. Replay Greeting is a
+  plain JSON response.
+- **Backend:** Next.js Route Handlers (`app/api/assistant/*/route.ts`); the
+  brief allows these in place of Express.
+- **API contract:** Zod schemas in `lib/schemas.ts` are the source of
+  truth; `openapi.yaml` is a hand-written mirror of them.
+- **LLM integration:** `lib/llm/`: one `LLMProvider` interface with three
+  implementations (Anthropic, OpenAI, offline mock). Called server-side
+  only; keys never reach the client.
+- **Structured output:** each prompt asks for a short narrative, a
+  `<<<STRUCTURED>>>` marker, then one JSON object. That's a single
+  plain-text completion, so all three providers use the same format. The
+  splitter (`lib/llm/streamSplitter.ts`) streams only the narrative and
+  tolerates the marker without its newlines. The JSON is then extracted
+  (fences and stray prose are fine), validated with Zod, and **checked
+  against the data the model was given** (`lib/structuredChecks.ts`):
+  - summary alerts must cover every queue item exactly once, with real ids;
+  - Help citations are filtered to sections that were actually retrieved;
+  - chat references are filtered to real items.
+
+  Anything that fails is replaced by a local fallback, and the `done`
+  frame says so.
+- **RAG:** `lib/rag.ts`, keyword/TF scoring over the five sections of
+  `content/approval-policy.md`, following the brief's "keyword retrieval
+  over 3-5 chunks is sufficient". No embeddings.
+- **Prompt versioning:** `prompts/*.ts`, versioned exports
+  (`SUMMARY_PROMPT_V1`, …), not inline strings.
+- **Rate limiting:** `lib/rateLimit.ts`, an in-memory sliding window: 30
+  requests / 5 min per session cookie, plus 120 / 5 min per IP so dropping
+  the cookie doesn't reset the allowance. 429s carry `Retry-After`. It's
+  process-local and single-instance by design; more than one instance
+  would need a shared store (e.g. Redis).
 
 ## Testing
 
-- **Unit (Jest, LLM call mocked):** `__tests__/unit/llmFallback.test.ts`
-  mocks the Anthropic provider directly to verify `streamCompletion()`
-  picks the right mode (`live`/`mock`/`degraded`) and — critically — never
-  throws, even when the provider rejects or hangs past the timeout. Also:
-  `streamSplitter`, `rag`, `heuristics`, `rateLimit`, `preflight`.
-- **Integration:** `__tests__/integration/{summary,help}Route.test.ts` call
-  the exported route handler `POST` functions directly with a real Fetch
-  `Request` and assert on the real `Response` — **not literally Supertest**.
-  Supertest needs an `http.Server` to attach to, and a Next.js App Router
-  route handler is just an exported `(req) => Response` function with no
-  server of its own to boot in a test. Calling it directly exercises the
-  exact same request/response contract Supertest would, without mocking
-  Next internals. Both files cover the success path, a validation failure
-  (400), and the fallback path (mocked provider that rejects still returns
-  200 with a valid structured payload and `mode: "degraded"`).
-- **Component (Vitest + Testing Library):**
-  `__tests__/component/StreamingAnswer.test.tsx` covers loading (skeleton),
-  streaming (partial text + cursor), done, and error (message + working
-  retry button) for the shared answer component every single-shot action
-  renders through.
+Jest:
+
+- **Unit** (`__tests__/unit`): `streamCompletion()` with the LLM provider
+  mocked: `live`/`mock`/`degraded` selection, never throws, first-token
+  and idle timeouts, a provider that ignores the abort signal, late tokens
+  dropped. Also the splitter, JSON extraction, retrieval, heuristics, rate
+  limiting and preflight.
+- **Integration** (`__tests__/integration`), via **Supertest**:
+  `helpers/routeServer.ts` mounts an App Router handler on a real Node
+  `http.Server` and streams its response back, so tests go over a socket.
+  - Success path, 400 validation, and the fallback path (a failing
+    provider still returns 200 with a usable payload, `mode: "degraded"`).
+  - `liveModelOutput.test.ts` feeds the routes realistic imperfect model
+    output: fenced JSON, marker without newlines, invented item ids, a
+    dropped item, wrong enum values, invented citations. It asserts the UI
+    either gets validated model data or is told it got the fallback.
+
+Vitest + Testing Library:
+
+- **Client** (`__tests__/client`): the SSE parser with frames split at
+  arbitrary byte boundaries, cut-off streams, 429 and network errors,
+  silent aborts; the store's cancellation of superseded streams, the
+  language it sends, and retry without duplicate messages.
+- **Component** (`__tests__/component`): the whole panel, driven by a
+  hand-fed `ReadableStream`. Tests watch loading → partial text with cursor
+  → done as bytes arrive, plus error → Retry, a mid-stream drop, the
+  fallback note, Talk to me, header controls, footer and read-aloud.
+
+**On test-first:** the first build (commits up to `2db97c5`) was written
+implementation-first, with tests added afterwards. A review then found real
+gaps, for example that the live-model path had never been tested. Every
+fix since is red → green: each `test(red): …` commit adds failing tests,
+and the next `fix(green)`/`feat(green)` commit makes them pass. `git log`
+shows the pairs.
 
 ## AI-necessary vs. AI-unnecessary, fallback design, and what I'd change
 
-Talk to me is the clearest AI-necessary case — free-form Q&A has no fixed
-shape a template could cover. Help me needs AI to synthesize retrieved
-policy text into a direct answer, but the *grounding* itself (keyword
-retrieval) is deliberately non-AI and deterministic. Present me Summary is
-the most interesting case: the urgency ranking is actually rule-based
-(`lib/heuristics.ts` — SLA overdue-ness plus flags), reused by both the
-offline mock and as the structured-output fallback; what the LLM adds is
-the readable narrative and language flexibility, not the ranking. Replay
-Greeting is the weakest AI-necessity case of the five — a template would
-almost suffice — kept LLM-backed only because the brief asked for a
-"context-aware" regenerated greeting specifically.
+Talk to me is the clearest AI-necessary case: free-form Q&A has no fixed
+shape a template could cover. Help me needs AI to turn retrieved policy
+text into a direct answer, but the grounding itself (keyword retrieval)
+is deterministic, and the model's citations are checked against it. In
+Present me Summary the urgency ranking is rule-based (`lib/heuristics.ts`:
+SLA overdue-ness plus flags); the LLM adds the readable narrative in the
+operator's language. Replay Greeting is the weakest case; a template
+almost suffices, and it's the fallback.
 
-Fallback design: every call gets an 8s timeout (`AbortController`); on
-timeout or provider error, it degrades to the offline mock provider —
-grounded in the same fixture data, not a blank error — rather than
-throwing. The route layer never returns a raw 500 for a generation failure;
-HTTP errors (400/429) only happen before any LLM call starts.
+Fallback design: 8s to the first token, then 8s maximum between tokens,
+so long healthy answers aren't cut off. Failing before any output switches
+to the grounded offline mock. Failing mid-stream stops with a short notice
+rather than gluing on a second answer. Invalid structured output falls
+back visibly (`structuredSource: "fallback"`). Generation failures never
+become HTTP errors.
 
-With more time: real (Redis-backed) rate limiting, full test depth on
-Teach me/Replay Greeting, and citation-level relevance scoring in RAG
-instead of TF/keyword matching.
+With more time: an eval suite running the prompts against a live key in
+CI, Redis-backed rate limiting, and deeper tests for Teach me and Replay
+Greeting.
 
 ## Assumptions made without asking
 
-- The reference screenshot's four action cards plus a separate "Replay
-  Greeting" link (not a fifth card) is reproduced as-is — that's the
-  layout in the reference image.
-- The mock queue's `submittedAt` timestamps are generated relative to
-  "now" at process start (see `lib/queue.ts`) rather than hardcoded to the
-  brief's literal "Sep 18" dates, so the demo doesn't look permanently
-  stale whenever it's actually run.
-- "Help me" resets to a fresh question rather than keeping a running
-  thread — the brief describes it as answering "a specific operational
-  question" (singular), whereas Talk to me is explicitly multi-turn.
+- The reference panel's four cards plus a separate "Replay Greeting" link
+  (not a fifth card) is reproduced as-is.
+- Queue timestamps are generated relative to "now" (`lib/queue.ts`)
+  instead of the brief's literal "Sep 18", so the SLA maths stays
+  meaningful whenever the demo runs.
+- "Operator's language" is the browser's `navigator.language`; there's no
+  in-app language picker.
+- "Help me" answers one question at a time, per the brief's "a specific
+  operational question"; Talk to me is the multi-turn one.
 
 ## AI tool usage
 
-Built with Claude (Cowork) end-to-end — scaffolding, the LLM
-provider/prompt/streaming layer, tests, and this README. Notably, the
-first draft of `prompts/context.ts`'s `<queue>`/`<policy>` extraction used
-an unanchored regex that silently matched the *word* "policy" appearing in
-a prompt's own instructions before the real data block — found by actually
-curling every endpoint and watching "Help me" come back ungrounded, not by
-code review or the type checker. Fixed by anchoring the regex on the tag
-being followed by a newline. Worth mentioning per the JD's own emphasis on
-using AI tools with judgment rather than as a checklist item: the fix
-required noticing a UI-visible symptom didn't match what the code should
-have done, not just accepting that it compiled and ran.
+Built with Claude (Cowork): scaffolding, the LLM/prompt/streaming layers,
+tests and this README. Three things it got wrong, each found by checking
+behaviour rather than trusting that the code compiled:
+
+- The first `<queue>`/`<policy>` extraction regex matched the literal tag
+  in the prompt's own instructions, so "Help me" silently lost its
+  retrieval context. Caught by curling the endpoints.
+- The first version only ever ran against the offline mock. Probing with
+  realistic model output showed fenced JSON being silently discarded and
+  raw JSON leaking into the chat bubble.
+- The skeleton "loading" state could never show in the app. The first
+  component test only reached it by passing a hard-coded status prop.
