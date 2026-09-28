@@ -174,38 +174,86 @@ describe("ApprovalsAssistantPanel — header controls and footer (reference pane
 });
 
 describe("ApprovalsAssistantPanel — read the summary aloud", () => {
+  const NARRATIVE = '"Safety Equipment & Sensor Specs" needs you first — it\'s past its 24h SLA. Then the drone video.';
+
   async function finishSummary() {
     const sse = controllableSse();
     onRequest("/api/assistant/summary", () => sse.response);
     await openPanel();
     fireEvent.click(screen.getByText("Present me Summary"));
     await act(async () => {
-      sse.frame("token", { text: "Clear the safety PDF first." });
+      sse.frame("token", { text: NARRATIVE });
       sse.frame("structured", { alerts: [], generatedAt: "t" });
       sse.frame("done", { mode: "mock", structuredSource: "model" });
       sse.close();
     });
-    await screen.findByText("Clear the safety PDF first.");
+    await screen.findByText(NARRATIVE);
   }
 
-  it("speaks the finished narrative in the operator's language when speech is supported", async () => {
-    const speak = vi.fn();
-    vi.stubGlobal("speechSynthesis", { speak, cancel: vi.fn(), speaking: false });
+  type FakeUtterance = { text: string; lang: string; voice: { name: string } | null; rate: number; onend?: () => void };
+
+  function stubSpeech(voices: { name: string; lang: string }[]) {
+    const spoken: FakeUtterance[] = [];
+    const synth = {
+      speak: vi.fn((u: FakeUtterance) => spoken.push(u)),
+      cancel: vi.fn(),
+      getVoices: () => voices.map((v) => ({ ...v, default: false, localService: true })),
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+      speaking: false,
+    };
+    vi.stubGlobal("speechSynthesis", synth);
     vi.stubGlobal(
       "SpeechSynthesisUtterance",
       class {
         lang = "";
+        voice = null;
+        rate = 1;
         constructor(public text: string) {}
       },
     );
+    return { synth, spoken };
+  }
+
+  it("reads sentence by sentence, with speech-friendly text, in the best installed voice", async () => {
+    const { spoken } = stubSpeech([
+      { name: "Fred", lang: navigator.language },
+      { name: "Samantha (Enhanced)", lang: navigator.language },
+    ]);
 
     await finishSummary();
     fireEvent.click(screen.getByText("Read aloud"));
 
-    expect(speak).toHaveBeenCalledTimes(1);
-    const utterance = speak.mock.calls[0][0] as { text: string; lang: string };
-    expect(utterance.text).toBe("Clear the safety PDF first.");
-    expect(utterance.lang).toBe(navigator.language);
+    expect(spoken.map((u) => u.text)).toEqual([
+      "Safety Equipment & Sensor Specs needs you first, it's past its 24 hours SLA.",
+      "Then the drone video.",
+    ]);
+    for (const u of spoken) {
+      expect(u.voice?.name).toBe("Samantha (Enhanced)");
+      expect(u.lang).toBe(navigator.language);
+      expect(u.rate).toBeLessThan(1);
+    }
+    expect(screen.getByText("Stop reading")).toBeInTheDocument();
+  });
+
+  it("goes back to 'Read aloud' after the last sentence finishes", async () => {
+    const { spoken } = stubSpeech([{ name: "Samantha", lang: navigator.language }]);
+    await finishSummary();
+    fireEvent.click(screen.getByText("Read aloud"));
+
+    await act(async () => spoken.at(-1)!.onend?.());
+    expect(screen.getByText("Read aloud")).toBeInTheDocument();
+  });
+
+  it("stops immediately when 'Stop reading' is clicked", async () => {
+    const { synth } = stubSpeech([{ name: "Samantha", lang: navigator.language }]);
+    await finishSummary();
+    fireEvent.click(screen.getByText("Read aloud"));
+    synth.cancel.mockClear();
+
+    fireEvent.click(screen.getByText("Stop reading"));
+    expect(synth.cancel).toHaveBeenCalled();
+    expect(screen.getByText("Read aloud")).toBeInTheDocument();
   });
 
   it("hides the button when the browser has no speech synthesis", async () => {
