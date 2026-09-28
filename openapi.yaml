@@ -1,0 +1,159 @@
+openapi: 3.0.3
+info:
+  title: Crystal Ball Approvals Assistant API
+  version: "1.0.0"
+  description: >
+    Hand-written OpenAPI contract mirroring lib/schemas.ts (source of truth).
+    Per the brief (§3, "API contract"), this is the OpenAPI-first artifact —
+    no Swagger UI wired up, just a readable mirror of the Zod schemas that
+    every route handler actually validates against.
+servers:
+  - url: /api/assistant
+
+paths:
+  /summary:
+    post:
+      summary: Present me Summary — SSE stream of a prioritized queue summary
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                language:
+                  type: string
+                  default: en
+      responses:
+        "200":
+          description: >
+            text/event-stream. Frames: `meta` ({mode}), `token` (partial
+            text, repeated), `structured` (SummaryStructured, see below),
+            `done`.
+          content:
+            text/event-stream:
+              schema:
+                type: string
+      x-structured-payload:
+        SummaryStructured:
+          type: object
+          required: [alerts, generatedAt]
+          properties:
+            alerts:
+              type: array
+              items:
+                type: object
+                required: [itemId, title, urgency, reason]
+                properties:
+                  itemId: { type: string }
+                  title: { type: string }
+                  urgency: { type: string, enum: [high, medium, low] }
+                  reason: { type: string, maxLength: 240 }
+            generatedAt: { type: string, format: date-time }
+
+  /chat:
+    post:
+      summary: Talk to me — multi-turn SSE conversation about the queue
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [message]
+              properties:
+                message: { type: string, minLength: 1, maxLength: 2000 }
+                history:
+                  type: array
+                  items:
+                    type: object
+                    required: [role, content]
+                    properties:
+                      role: { type: string, enum: [user, assistant] }
+                      content: { type: string }
+      responses:
+        "200":
+          description: "text/event-stream. Frames: meta, token*, structured, done."
+          content:
+            text/event-stream:
+              schema:
+                type: string
+
+  /help:
+    post:
+      summary: Help me — RAG-grounded answer to an operational question
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [question]
+              properties:
+                question: { type: string, minLength: 1, maxLength: 1000 }
+      responses:
+        "200":
+          description: >
+            text/event-stream. Frames: meta, token*, structured
+            (HelpStructured: citations[], grounded, generatedAt), done.
+          content:
+            text/event-stream:
+              schema:
+                type: string
+
+  /teach:
+    post:
+      summary: Teach me — step-by-step walkthrough, adapts to follow-ups
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                message: { type: string, maxLength: 2000 }
+                history:
+                  type: array
+                  items:
+                    type: object
+      responses:
+        "200":
+          description: "text/event-stream. Frames: meta, token*, structured, done."
+          content:
+            text/event-stream:
+              schema:
+                type: string
+
+  /greeting:
+    post:
+      summary: Replay Greeting — regenerates a short context-aware greeting
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+      responses:
+        "200":
+          description: Structured JSON (non-streaming; short enough not to need it).
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [greeting, pendingCount, generatedAt, mode]
+                properties:
+                  greeting: { type: string }
+                  pendingCount: { type: integer }
+                  generatedAt: { type: string, format: date-time }
+                  mode: { type: string, enum: [live, mock, degraded] }
+        "429":
+          description: Rate limited.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+components:
+  schemas:
+    ErrorResponse:
+      type: object
+      required: [error, message]
+      properties:
+        error: { type: string }
+        message: { type: string }
+        retryAfterMs: { type: integer }
