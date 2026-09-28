@@ -41,6 +41,30 @@ describe("preflight", () => {
   });
 });
 
+describe("preflight — clients that drop their session cookie", () => {
+  beforeEach(() => resetRateLimitStore());
+
+  const fromIp = (ip: string) =>
+    new Request("http://localhost/api/assistant/summary", { method: "POST", headers: { "x-forwarded-for": ip } });
+
+  it("still caps a client that sends no cookie (a fresh session every request) via a per-IP limit", () => {
+    let last: ReturnType<typeof preflight> | undefined;
+    for (let i = 0; i < 121; i += 1) last = preflight(fromIp("203.0.113.7"));
+    expect(last).toBeInstanceOf(Response);
+    expect((last as Response).status).toBe(429);
+  });
+
+  it("keeps IPs independent", () => {
+    for (let i = 0; i < 121; i += 1) preflight(fromIp("203.0.113.7"));
+    expect(preflight(fromIp("198.51.100.2"))).not.toBeInstanceOf(Response);
+  });
+
+  it("uses the first address in x-forwarded-for (the client, not the proxy)", () => {
+    for (let i = 0; i < 121; i += 1) preflight(fromIp("203.0.113.7, 10.0.0.1"));
+    expect(preflight(fromIp("203.0.113.7"))).toBeInstanceOf(Response);
+  });
+});
+
 describe("parseJsonBody", () => {
   const schema = z.object({ question: z.string().min(1) });
 
