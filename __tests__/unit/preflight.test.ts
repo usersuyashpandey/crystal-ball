@@ -52,6 +52,7 @@ describe("preflight — clients that drop their session cookie", () => {
     for (let i = 0; i < 121; i += 1) last = preflight(fromIp("203.0.113.7"));
     expect(last).toBeInstanceOf(Response);
     expect((last as Response).status).toBe(429);
+    expect(Number((last as Response).headers.get("Retry-After"))).toBeGreaterThan(0);
   });
 
   it("keeps IPs independent", () => {

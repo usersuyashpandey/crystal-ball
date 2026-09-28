@@ -1,5 +1,5 @@
 import type { z } from "zod";
-import { checkRateLimit, getOrCreateSessionId, sessionCookieHeader } from "@/lib/rateLimit";
+import { checkRateLimit, clientIp, getOrCreateSessionId, sessionCookieHeader, RATE_LIMITS } from "@/lib/rateLimit";
 import type { ErrorResponse } from "@/lib/schemas";
 
 function jsonError(status: number, body: ErrorResponse, extraHeaders?: HeadersInit): Response {
@@ -14,14 +14,16 @@ export interface PreflightOk {
 }
 
 /**
- * Session + rate limit check shared by every assistant route. Returns a
+ * Session + rate limit check (per session and per IP) shared by every assistant route. Returns a
  * ready-to-send Response if the request should be rejected outright (a
  * plain, ordinary HTTP error — this is a request the caller made too many
  * of, not an LLM failure), or the session info to proceed with.
  */
 export function preflight(req: Request): PreflightOk | Response {
   const { sessionId, newCookieValue } = getOrCreateSessionId(req);
-  const rl = checkRateLimit(sessionId);
+  const perSession = checkRateLimit(`session:${sessionId}`, RATE_LIMITS.perSession);
+  const perIp = checkRateLimit(`ip:${clientIp(req)}`, RATE_LIMITS.perIp);
+  const rl = !perSession.ok ? perSession : perIp;
 
   if (!rl.ok) {
     return jsonError(
@@ -31,7 +33,10 @@ export function preflight(req: Request): PreflightOk | Response {
         message: "Too many requests to the assistant — wait a moment and try again.",
         retryAfterMs: rl.retryAfterMs,
       },
-      newCookieValue ? { "Set-Cookie": sessionCookieHeader(newCookieValue) } : undefined,
+      {
+        "Retry-After": String(Math.ceil(rl.retryAfterMs / 1000)),
+        ...(newCookieValue ? { "Set-Cookie": sessionCookieHeader(newCookieValue) } : {}),
+      },
     );
   }
 
