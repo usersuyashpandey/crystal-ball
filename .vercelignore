@@ -1,0 +1,9 @@
+# Never upload local secrets; keys are set as Vercel environment variables.
+.env*
+!.env.example
+# Build output, caches and editor/agent files aren't needed for a deploy.
+.next
+node_modules
+coverage
+AGENTS.md
+CLAUDE.md
