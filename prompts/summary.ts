@@ -29,7 +29,7 @@ Output format (exactly two parts, in this order, nothing else):
 2. The exact line "${STRUCTURED_DELIMITER.trim()}" on its own, followed by
    one JSON object (no markdown fences, no trailing text) of the shape:
    {"alerts": [{"itemId": string, "title": string, "urgency": "high"|"medium"|"low", "reason": string (<=240 chars)}], "generatedAt": ISO-8601 string}
-   Every item in <queue> must appear exactly once in "alerts".
+   Every item in the queue data below must appear exactly once in "alerts".
 
 ${queueBlock(queue)}`;
 

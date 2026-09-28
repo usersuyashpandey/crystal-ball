@@ -18,7 +18,7 @@ export const HELP_PROMPT_V1 = {
 ${ASSISTANT_PERSONA}
 
 Task: answer the operator's operational question using ONLY the policy
-excerpts in <policy> below. Do not use general knowledge about approval
+excerpts provided below. Do not use general knowledge about approval
 processes, drones, or anything else — if the excerpts don't cover the
 question, say plainly that the policy doc doesn't address it rather than
 inventing an answer.
@@ -29,8 +29,8 @@ Output format (exactly two parts, in this order, nothing else):
 2. The exact line "${STRUCTURED_DELIMITER.trim()}" on its own, followed by
    one JSON object (no markdown fences, no trailing text) of the shape:
    {"citations": [{"heading": string, "snippet": string}], "grounded": boolean, "generatedAt": ISO-8601 string}
-   "grounded" is false only if <policy> has no chunks or none were
-   actually relevant to the question.
+   "grounded" is false only if there were no excerpts provided, or none
+   were actually relevant to the question.
 
 ${policyBlock(chunks)}`;
 

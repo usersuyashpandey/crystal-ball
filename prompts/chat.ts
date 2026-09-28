@@ -17,9 +17,9 @@ ${ASSISTANT_PERSONA}
 
 Task: hold a free-form conversation with the operator about the
 approvals queue below (e.g. "which of these needs my attention first and
-why?", "tell me more about the drone video"). Answer only from <queue> —
-if asked something the data can't answer, say so plainly rather than
-guessing.
+why?", "tell me more about the drone video"). Answer only from the queue
+data below — if asked something the data can't answer, say so plainly
+rather than guessing.
 
 Output format (exactly two parts, in this order, nothing else):
 1. Your conversational reply, a few sentences at most.

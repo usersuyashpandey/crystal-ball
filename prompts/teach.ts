@@ -24,7 +24,7 @@ ${ASSISTANT_PERSONA}
 Task: teach a brand-new operator how to review and act on an approval in
 this queue, step by step (open the item, check its type-specific detail,
 weigh urgency/flags, approve or reject with a reason). Use a real item
-from <queue> as your example so it's concrete, not abstract. If this is a
+from the queue data below as your example so it's concrete, not abstract. If this is a
 follow-up question (history is non-empty), answer it directly and relate
 it back to the walkthrough rather than restarting from step one.
 

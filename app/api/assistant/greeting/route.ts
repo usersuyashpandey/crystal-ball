@@ -1,0 +1,51 @@
+import { preflight, parseJsonBody } from "@/lib/api/preflight";
+import { greetingRequestSchema, greetingResponseSchema, type StreamMode } from "@/lib/schemas";
+import { getQueueSnapshot } from "@/lib/queue";
+import { GREETING_PROMPT_V1 } from "@/prompts/greeting";
+import { streamCompletion } from "@/lib/llm";
+
+export const dynamic = "force-dynamic";
+
+/**
+ * "Replay Greeting" — short enough that streaming isn't worth the
+ * complexity (brief §1 asks for a regenerated greeting, not a
+ * conversation), so this is the one JSON, non-streaming assistant
+ * endpoint. Still goes through the same timeout/fallback-carrying
+ * streamCompletion() as everything else, and pendingCount is computed
+ * from the fixture directly rather than trusted from the model.
+ */
+export async function POST(req: Request) {
+  const pre = preflight(req);
+  if (pre instanceof Response) return pre;
+
+  const body = await parseJsonBody(req, greetingRequestSchema);
+  if (body instanceof Response) return body;
+  void body;
+
+  const queue = getQueueSnapshot();
+  const fallbackGreeting = `Welcome back — ${queue.length} item${queue.length === 1 ? "" : "s"} pending review.`;
+
+  let greeting = fallbackGreeting;
+  let mode: StreamMode = "degraded";
+
+  try {
+    const { system, messages } = GREETING_PROMPT_V1.build(queue);
+    const result = await streamCompletion({ system, messages, maxTokens: 120, timeoutMs: 8000 });
+    greeting = result.fullText.trim() || fallbackGreeting;
+    mode = result.mode;
+  } catch {
+    greeting = fallbackGreeting;
+    mode = "degraded";
+  }
+
+  const payload = greetingResponseSchema.parse({
+    greeting,
+    pendingCount: queue.length,
+    generatedAt: new Date().toISOString(),
+    mode,
+  });
+
+  const headers = new Headers({ "Content-Type": "application/json" });
+  if (pre.cookieHeader) headers.append("Set-Cookie", pre.cookieHeader);
+  return new Response(JSON.stringify(payload), { status: 200, headers });
+}

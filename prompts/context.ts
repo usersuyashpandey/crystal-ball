@@ -23,8 +23,14 @@ export function queueBlock(queue: ApprovalItem[]): string {
   return `<queue>\n${JSON.stringify(queue, null, 2)}\n</queue>`;
 }
 
+// Anchored on the tag being immediately followed by a newline (exactly how
+// queueBlock/policyBlock emit it), not just the bare substring "<queue>" —
+// the task instructions below legitimately *talk about* "the queue data"
+// without meaning to open the data block, and an unanchored regex can
+// latch onto that prose instead of the real block. Learned the hard way:
+// see the "why anchored, not bare substring" note in __tests__/unit.
 export function extractQueue(system: string): ApprovalItem[] | null {
-  const match = system.match(/<queue>([\s\S]*?)<\/queue>/);
+  const match = system.match(/<queue>\n([\s\S]*?)\n<\/queue>/);
   if (!match) return null;
   try {
     return JSON.parse(match[1]);
@@ -38,7 +44,7 @@ export function policyBlock(chunks: PolicyChunk[]): string {
 }
 
 export function extractPolicy(system: string): PolicyChunk[] | null {
-  const match = system.match(/<policy>([\s\S]*?)<\/policy>/);
+  const match = system.match(/<policy>\n([\s\S]*?)\n<\/policy>/);
   if (!match) return null;
   try {
     return JSON.parse(match[1]);
