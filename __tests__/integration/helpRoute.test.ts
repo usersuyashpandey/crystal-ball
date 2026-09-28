@@ -6,6 +6,8 @@
  * covers vs. one it doesn't.
  */
 
+export {}; // no top-level imports otherwise — force module scope, not global
+
 interface SseFrame {
   event: string;
   data: Record<string, unknown>;

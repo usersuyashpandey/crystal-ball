@@ -6,6 +6,8 @@
  * must never bubble up as a raw failure.
  */
 
+export {}; // no top-level imports otherwise — force module scope, not global
+
 const ORIGINAL_ENV = { ...process.env };
 
 describe("streamCompletion", () => {

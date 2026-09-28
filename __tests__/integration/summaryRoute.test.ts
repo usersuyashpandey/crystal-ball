@@ -17,6 +17,8 @@
  * fallback/timeout path (a configured provider that fails outright).
  */
 
+export {}; // no top-level imports otherwise — force module scope, not global
+
 interface SseFrame {
   event: string;
   data: Record<string, unknown>;
