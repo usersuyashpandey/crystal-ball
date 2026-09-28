@@ -19,8 +19,22 @@ export function extractPromptKind(system: string): string | null {
   return match ? match[1] : null;
 }
 
-export function queueBlock(queue: ApprovalItem[]): string {
-  return `<queue>\n${JSON.stringify(queue, null, 2)}\n</queue>`;
+/** Where an item stands against its SLA right now — computed here so the
+ * model never has to do date arithmetic (it can't know the time). */
+function slaPosition(item: ApprovalItem, now: Date) {
+  const hoursPending = (now.getTime() - new Date(item.submittedAt).getTime()) / 3_600_000;
+  const hoursLeft = item.slaHours - hoursPending;
+  return {
+    hoursPending: Math.round(hoursPending),
+    slaStatus: hoursLeft < 0 ? `overdue by ${Math.round(-hoursLeft)}h` : `due in ${Math.round(hoursLeft)}h`,
+  };
+}
+
+export function queueBlock(queue: ApprovalItem[], now: Date = new Date()): string {
+  const items = queue.map((item) => ({ ...item, ...slaPosition(item, now) }));
+  return `Current time: ${now.toISOString()}. Each item's hoursPending and slaStatus are already
+calculated for this time; use them as given rather than working from the dates.
+<queue>\n${JSON.stringify(items, null, 2)}\n</queue>`;
 }
 
 // Anchored on the tag being immediately followed by a newline (exactly how
@@ -57,5 +71,5 @@ export const ASSISTANT_PERSONA = `You are the "Approvals" assistant embedded in 
 Approvals & Review dashboard. You speak to a single operator working
 through a queue of pending approvals. Be concise, concrete, and never
 invent items, names, or numbers that aren't in the data you're given.
-Write plain text: the panel shows your reply as-is, so no markdown
-(no **bold**, headings, or bullet syntax).`;
+Keep formatting light: plain sentences, with a numbered list only for
+step-by-step instructions. No headings or tables.`;

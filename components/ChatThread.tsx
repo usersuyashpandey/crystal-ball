@@ -2,6 +2,7 @@
 
 import { useState, type FormEvent } from "react";
 import type { ChatMessage } from "@/lib/schemas";
+import { RichText } from "./RichText";
 
 interface ChatThreadProps {
   messages: ChatMessage[];
@@ -35,9 +36,21 @@ export function ChatThread({ messages, status, error, placeholder, onSend, onRet
                 m.role === "user" ? "bg-violet-600 text-white" : "bg-slate-100 text-slate-800"
               }`}
             >
-              {m.content || ((status === "streaming" || status === "loading") && i === messages.length - 1 ? (
-                <span data-testid="streaming-cursor" className="inline-block h-3 w-1.5 animate-pulse bg-slate-400 align-middle" />
-              ) : null)}
+              {m.role === "user" ? (
+                m.content
+              ) : (
+                <RichText
+                  text={m.content}
+                  trailing={
+                    (status === "streaming" || status === "loading") && i === messages.length - 1 ? (
+                      <span
+                        data-testid="streaming-cursor"
+                        className="ml-0.5 inline-block h-3 w-1.5 animate-pulse bg-slate-400 align-middle"
+                      />
+                    ) : null
+                  }
+                />
+              )}
             </div>
           </div>
         ))}

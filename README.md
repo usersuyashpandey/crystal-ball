@@ -69,7 +69,7 @@ npm run typecheck
 npm run build
 ```
 
-113 tests, all passing: 86 under Jest, 27 under Vitest.
+122 tests, all passing: 89 under Jest, 33 under Vitest.
 
 ## Architecture
 
@@ -114,7 +114,12 @@ npm run build
   `content/approval-policy.md`, following the brief's "keyword retrieval
   over 3-5 chunks is sufficient". No embeddings.
 - **Prompt versioning:** `prompts/*.ts`, versioned exports
-  (`SUMMARY_PROMPT_V1`, …), not inline strings.
+  (`SUMMARY_PROMPT_V1`, …), not inline strings. The shared queue block
+  states the current time and each item's `hoursPending` / `slaStatus`,
+  computed server-side, so the model never does date arithmetic.
+- **Rendering model text:** `components/RichText.tsx` shows the light
+  markdown models add anyway (bold, code, numbered/dash lists) as real
+  elements. Model output is never treated as HTML.
 - **Rate limiting:** `lib/rateLimit.ts`, an in-memory sliding window: 30
   requests / 5 min per session cookie, plus 120 / 5 min per IP so dropping
   the cookie doesn't reset the allowance. 429s carry `Retry-After`. It's

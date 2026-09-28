@@ -1,3 +1,5 @@
+import { RichText } from "./RichText";
+
 export type StreamingAnswerStatus = "idle" | "loading" | "streaming" | "done" | "error";
 
 interface StreamingAnswerProps {
@@ -49,16 +51,18 @@ export function StreamingAnswer({ status, narrative, error, onRetry, idleLabel }
     );
   }
 
+  const cursor =
+    status === "streaming" ? (
+      <span
+        data-testid="streaming-cursor"
+        className="ml-0.5 inline-block h-4 w-1.5 animate-pulse bg-slate-400 align-middle"
+        aria-hidden
+      />
+    ) : null;
+
   return (
-    <p data-testid="answer-text" className="whitespace-pre-wrap text-sm leading-relaxed text-slate-700">
-      {narrative}
-      {status === "streaming" && (
-        <span
-          data-testid="streaming-cursor"
-          className="ml-0.5 inline-block h-4 w-1.5 animate-pulse bg-slate-400 align-middle"
-          aria-hidden
-        />
-      )}
-    </p>
+    <div data-testid="answer-text" className="text-sm leading-relaxed text-slate-700">
+      <RichText text={narrative} trailing={cursor} />
+    </div>
   );
 }
