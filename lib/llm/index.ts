@@ -2,6 +2,7 @@ import type { LLMMessage, LLMProvider, CompletionResult } from "./types";
 import { anthropicProvider } from "./providers/anthropic";
 import { openaiProvider } from "./providers/openai";
 import { geminiProvider } from "./providers/gemini";
+import { groqProvider } from "./providers/groq";
 import { mockProvider } from "./providers/mock";
 
 export type { LLMMessage, CompletionResult };
@@ -18,11 +19,12 @@ const PROVIDERS: Record<string, { provider: LLMProvider; keyEnv: string }> = {
   anthropic: { provider: anthropicProvider, keyEnv: "ANTHROPIC_API_KEY" },
   openai: { provider: openaiProvider, keyEnv: "OPENAI_API_KEY" },
   gemini: { provider: geminiProvider, keyEnv: "GEMINI_API_KEY" },
+  groq: { provider: groqProvider, keyEnv: "GROQ_API_KEY" },
 };
-const AUTO_ORDER = ["anthropic", "openai", "gemini"];
+const AUTO_ORDER = ["anthropic", "openai", "gemini", "groq"];
 
 /**
- * LLM_PROVIDER (anthropic | openai | gemini | mock) forces a provider;
+ * LLM_PROVIDER (anthropic | openai | gemini | groq | mock) forces a provider;
  * otherwise the first one with a key wins, Claude first. A forced provider
  * with no key falls back to the offline mock rather than guessing another.
  */

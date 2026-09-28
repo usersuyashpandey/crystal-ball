@@ -29,7 +29,7 @@ npm run dev                  # http://localhost:3000
 
 The app works with **no API key at all**. `lib/llm/index.ts` picks a
 provider in this order: `ANTHROPIC_API_KEY` → `OPENAI_API_KEY` →
-`GEMINI_API_KEY` → **offline mock provider**. The mock isn't placeholder text: it reads the same
+`GEMINI_API_KEY` → `GROQ_API_KEY` → **offline mock provider**. The mock isn't placeholder text: it reads the same
 `<queue>`/`<policy>` context every real prompt embeds (`prompts/context.ts`)
 and answers from the actual fixture data, streamed word by word so the
 token-by-token UI is exercised either way.
@@ -48,9 +48,13 @@ To use a real model, set one key in `.env.local`:
   (`GEMINI_MODEL`). The brief doesn't name Gemini; it's included because
   its free tier needs no card, which makes it the easy way to try the app
   against a real model. Get a key at https://aistudio.google.com/apikey.
+- `GROQ_API_KEY`: Groq, default `llama-3.3-70b-versatile` (`GROQ_MODEL`).
+  Also free with no card, and usually much faster to first token than
+  Gemini's free tier, which can hit the 8s budget at busy times. Get a key
+  at https://console.groq.com/keys.
 
-The automatic order is Anthropic → OpenAI → Gemini → mock. Set
-`LLM_PROVIDER` (`anthropic` | `openai` | `gemini` | `mock`) to force one,
+The automatic order is Anthropic → OpenAI → Gemini → Groq → mock. Set
+`LLM_PROVIDER` (`anthropic` | `openai` | `gemini` | `groq` | `mock`) to force one,
 for example when an Anthropic key is present but has no credit. If a live
 call fails, the server logs the provider and its error message, never the
 key, so "Degraded fallback" in the panel always has a visible cause.
@@ -65,7 +69,7 @@ npm run typecheck
 npm run build
 ```
 
-109 tests, all passing: 82 under Jest, 27 under Vitest.
+113 tests, all passing: 86 under Jest, 27 under Vitest.
 
 ## Architecture
 
@@ -90,7 +94,7 @@ npm run build
 - **API contract:** Zod schemas in `lib/schemas.ts` are the source of
   truth; `openapi.yaml` is a hand-written mirror of them.
 - **LLM integration:** `lib/llm/`: one `LLMProvider` interface. Anthropic
-  uses its own SDK; OpenAI and Gemini share one OpenAI-compatible
+  uses its own SDK; OpenAI, Gemini and Groq share one OpenAI-compatible
   implementation; the offline mock is the fallback. Called server-side
   only; keys never reach the client.
 - **Structured output:** each prompt asks for a short narrative, a
@@ -125,7 +129,7 @@ Jest:
   mocked: `live`/`mock`/`degraded` selection, never throws, first-token
   and idle timeouts, a provider that ignores the abort signal, late tokens
   dropped, provider selection and `LLM_PROVIDER`, failures logged without
-  the key. Also the Gemini provider (OpenAI SDK mocked), the splitter, JSON
+  the key. Also the Gemini and Groq providers (OpenAI SDK mocked), the splitter, JSON
   extraction, retrieval, heuristics, rate limiting, preflight, and the
   read-aloud helpers.
 - **Integration** (`__tests__/integration`), via **Supertest**:
