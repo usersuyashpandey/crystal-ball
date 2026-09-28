@@ -77,7 +77,7 @@ export function ChatThread({ messages, status, error, placeholder, onSend, onRet
           onChange={(e) => setDraft(e.target.value)}
           placeholder={placeholder}
           disabled={busy}
-          className="flex-1 rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-violet-400 focus:outline-none disabled:opacity-60"
+          className="flex-1 rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 placeholder:text-slate-400 focus:border-violet-400 focus:outline-none disabled:bg-slate-50 disabled:opacity-60"
         />
         <button
           type="submit"

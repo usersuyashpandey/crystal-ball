@@ -1,14 +1,17 @@
 import { getQueueSnapshot } from "@/lib/queue";
-import { QueueDashboard } from "@/components/QueueDashboard";
+import { AppShell } from "@/components/layout/AppShell";
+import { ApprovalsWorkspace } from "@/components/approvals/ApprovalsWorkspace";
 import { ApprovalsAssistantPanel } from "@/components/ApprovalsAssistantPanel";
+
+export const dynamic = "force-dynamic";
 
 export default function Home() {
   const queue = getQueueSnapshot();
 
   return (
-    <main className="min-h-screen bg-slate-50 px-6 py-10">
-      <QueueDashboard queue={queue} />
+    <AppShell>
+      <ApprovalsWorkspace queue={queue} />
       <ApprovalsAssistantPanel />
-    </main>
+    </AppShell>
   );
 }

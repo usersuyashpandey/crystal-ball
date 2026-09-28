@@ -55,10 +55,10 @@ describe("ApprovalsWorkspace", () => {
   it("selecting a row shows it in the detail pane", () => {
     render(<ApprovalsWorkspace queue={APPROVALS_QUEUE} />);
     const detail = screen.getByTestId("approval-detail");
-    expect(within(detail).getByRole("heading")).toHaveTextContent("Site Patrol Onboarding & Checklists");
+    expect(within(detail).getByRole("heading", { level: 2 })).toHaveTextContent("Site Patrol Onboarding & Checklists");
 
     fireEvent.click(within(rows()[2]).getByText("Safety Equipment & Sensor Specs"));
-    expect(within(detail).getByRole("heading")).toHaveTextContent("Safety Equipment & Sensor Specs");
+    expect(within(detail).getByRole("heading", { level: 2 })).toHaveTextContent("Safety Equipment & Sensor Specs");
     expect(rows()[2]).toHaveAttribute("aria-selected", "true");
     expect(within(detail).getByText(/overdue/i)).toBeInTheDocument();
   });
@@ -73,7 +73,7 @@ describe("ApprovalsWorkspace", () => {
 
   it("a row's actions menu can ask the assistant about that item", async () => {
     const sse = controllableSse();
-    const fetchMock = vi.fn(async (url: string) =>
+    const fetchMock = vi.fn<(url: string, init?: RequestInit) => Promise<Response>>(async (url) =>
       url.endsWith("/greeting")
         ? jsonResponse(200, { greeting: "Hi", pendingCount: 4, generatedAt: "t", mode: "mock" })
         : sse.response,
@@ -87,8 +87,8 @@ describe("ApprovalsWorkspace", () => {
     const state = useAssistantStore.getState();
     expect(state.isOpen).toBe(true);
     expect(state.view).toBe("chat");
-    const chatCall = fetchMock.mock.calls.find(([u]) => (u as string).endsWith("/chat"));
-    expect(JSON.parse((chatCall![1] as RequestInit).body as string).message).toContain("Level 2 Drone Patrol Video Demo");
+    const chatCall = fetchMock.mock.calls.find(([u]) => u.endsWith("/chat"));
+    expect(JSON.parse(chatCall![1]!.body as string).message).toContain("Level 2 Drone Patrol Video Demo");
     await act(async () => sse.close());
   });
 });

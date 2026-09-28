@@ -40,7 +40,13 @@ describe("queueBlock", () => {
   });
 
   it("is what every prompt embeds (checked via the summary prompt)", () => {
-    const { system } = SUMMARY_PROMPT_V2.build([item("late", 70, 24)], "en");
-    expect(system).toContain("overdue by 46h");
+    // Prompts use the real clock, so build the item relative to it too.
+    jest.useFakeTimers().setSystemTime(NOW);
+    try {
+      const { system } = SUMMARY_PROMPT_V2.build([item("late", 70, 24)], "en");
+      expect(system).toContain("overdue by 46h");
+    } finally {
+      jest.useRealTimers();
+    }
   });
 });

@@ -91,6 +91,10 @@ interface AssistantStore {
   runTeach: (message?: string) => Promise<void>;
   retryChat: () => Promise<void>;
   retryTeach: () => Promise<void>;
+  /** From a queue row: open the panel on Talk to me with a question about it. */
+  askAbout: (itemTitle: string) => Promise<void>;
+  /** Open the panel straight on one action (e.g. "Add help" -> Help me). */
+  openOn: (view: AssistantView) => void;
 }
 
 export const useAssistantStore = create<AssistantStore>((set, get) => {
@@ -237,6 +241,17 @@ export const useAssistantStore = create<AssistantStore>((set, get) => {
     retryChat: async () => {
       const content = popLastExchange("chat");
       if (content !== undefined) await get().sendChat(content);
+    },
+
+    askAbout: async (itemTitle: string) => {
+      get().open();
+      set({ view: "chat" });
+      await get().sendChat(`Tell me about "${itemTitle}". What should I check before approving it?`);
+    },
+
+    openOn: (view) => {
+      get().open();
+      set({ view });
     },
 
     retryTeach: async () => {

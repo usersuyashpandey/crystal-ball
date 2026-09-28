@@ -1,5 +1,6 @@
 import type { ApprovalItem } from "@/lib/queue";
 import type { PolicyChunk } from "@/lib/rag";
+import { slaPosition } from "@/lib/sla";
 
 /**
  * Shared building blocks for every prompt in /prompts. Keeping these in one
@@ -19,19 +20,11 @@ export function extractPromptKind(system: string): string | null {
   return match ? match[1] : null;
 }
 
-/** Where an item stands against its SLA right now — computed here so the
- * model never has to do date arithmetic (it can't know the time). */
-function slaPosition(item: ApprovalItem, now: Date) {
-  const hoursPending = (now.getTime() - new Date(item.submittedAt).getTime()) / 3_600_000;
-  const hoursLeft = item.slaHours - hoursPending;
-  return {
-    hoursPending: Math.round(hoursPending),
-    slaStatus: hoursLeft < 0 ? `overdue by ${Math.round(-hoursLeft)}h` : `due in ${Math.round(hoursLeft)}h`,
-  };
-}
-
 export function queueBlock(queue: ApprovalItem[], now: Date = new Date()): string {
-  const items = queue.map((item) => ({ ...item, ...slaPosition(item, now) }));
+  const items = queue.map((item) => {
+    const { hoursPending, slaStatus } = slaPosition(item.submittedAt, item.slaHours, now);
+    return { ...item, hoursPending, slaStatus };
+  });
   return `Current time: ${now.toISOString()}. Each item's hoursPending and slaStatus are already
 calculated for this time; use them as given rather than working from the dates.
 <queue>\n${JSON.stringify(items, null, 2)}\n</queue>`;

@@ -69,16 +69,22 @@ npm run typecheck
 npm run build
 ```
 
-122 tests, all passing: 89 under Jest, 33 under Vitest.
+133 tests, all passing: 89 under Jest, 44 under Vitest.
 
 ## Architecture
 
 - **Frontend:** Next.js 16 (App Router), React 19, TypeScript strict,
-  Tailwind. `components/ApprovalsAssistantPanel.tsx` is the panel: header
-  with info / expand / close, the four action cards, Replay Greeting, a
-  footer with the pending count, and read-aloud for the summary (Web Speech
-  API). `components/QueueDashboard.tsx` is a simplified backdrop; the brief
-  only asks for the panel.
+  Tailwind, lucide-react icons. The page follows the reference screenshot:
+  `components/layout/AppShell.tsx` (top bar, icon sidebar, status bar) and
+  `components/approvals/` (search, the pending-requests table with Queue /
+  Hierarchy views, row selection, a detail pane with Snapshot & Control /
+  Media tabs, and a row menu that asks the assistant about an item).
+  `components/ApprovalsAssistantPanel.tsx` is the panel: navy header with
+  info / expand / close, Replay Greeting, the four action cards, the
+  "folders / items" footer, the round floating toggle, and read-aloud for
+  the summary. The card illustrations are original; the reference's 3D
+  character artwork isn't reproduced. Light theme only, as in the
+  reference.
 - **State:** Zustand (`lib/store.ts`). Per action: status
   (idle → loading → streaming → done | error), text, validated structured
   payload, `mode`, and `structuredSource`. Starting a request aborts any
