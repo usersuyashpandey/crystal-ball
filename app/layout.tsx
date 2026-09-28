@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import type { ReactNode } from "react";
 import "./globals.css";
 
 // Deliberately not next/font/google here: it fetches from
@@ -12,7 +13,10 @@ export const metadata: Metadata = {
   description: "OomniEye Approvals & Review panel with a real LLM-backed assistant.",
 };
 
-export default function RootLayout({ children }: LayoutProps<"/">) {
+// Explicit prop type rather than Next's generated `LayoutProps`, which only
+// exists after `next dev`/`next build` has run — so `npm run typecheck` works
+// on a fresh clone too.
+export default function RootLayout({ children }: Readonly<{ children: ReactNode }>) {
   return (
     <html lang="en" className="h-full antialiased">
       <body className="min-h-full flex flex-col">{children}</body>
