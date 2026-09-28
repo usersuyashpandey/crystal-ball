@@ -1,5 +1,11 @@
 # Crystal Ball Command Centre — Approvals Assistant
 
+**Live demo: https://crystal-ball-nu.vercel.app** (Vercel; click the round
+button bottom-right to open the assistant). The deployment runs on Groq's
+free tier (`LLM_PROVIDER=groq`) because no Claude credit was available when
+it was deployed. The code defaults to Claude: set `ANTHROPIC_API_KEY` and
+remove `LLM_PROVIDER` to use it.
+
 A working rebuild of OomniEye's "Approvals" assistant panel (Wave 2 take-home
 assignment, Sr. Fullstack Developer — MERN + AI), with all five entry points
 wired to a real LLM call: **Present me Summary**, **Talk to me**, **Help
@@ -69,7 +75,15 @@ npm run typecheck
 npm run build
 ```
 
-133 tests, all passing: 89 under Jest, 44 under Vitest.
+136 tests, all passing: 92 under Jest, 44 under Vitest.
+
+### Deploying
+
+Vercel works out of the box (`vercel deploy --prod`, or import the repo at
+vercel.com/new). Set the provider key and, if needed, `LLM_PROVIDER` as
+project environment variables; `.vercelignore` keeps local `.env` files out
+of CLI uploads. On serverless, the in-memory rate limiter is per instance,
+so it's looser than on a single server.
 
 ## Architecture
 
