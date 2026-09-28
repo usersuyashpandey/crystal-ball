@@ -8,12 +8,14 @@ interface OpenAICompatibleConfig {
   defaultModel: string;
   /** Omit for api.openai.com. Read lazily so env changes are picked up. */
   baseURL?: () => string | undefined;
+  /** Provider/model-specific request fields, e.g. reasoning effort. */
+  extraParams?: (model: string) => { reasoning_effort?: "low" | "medium" | "high" };
 }
 
 /**
  * One implementation for every provider that speaks the OpenAI Chat
- * Completions API: OpenAI itself, and Google Gemini through its
- * OpenAI-compatible endpoint.
+ * Completions API: OpenAI itself, plus Gemini and Groq through their
+ * OpenAI-compatible endpoints.
  */
 export function createOpenAICompatibleProvider(config: OpenAICompatibleConfig): LLMProvider {
   let client: OpenAI | null = null;
@@ -29,9 +31,11 @@ export function createOpenAICompatibleProvider(config: OpenAICompatibleConfig): 
   return {
     name: config.name,
     async streamComplete({ system, messages, maxTokens = 1024, onToken, signal }: StreamCompleteOptions) {
+      const model = process.env[config.modelEnv] || config.defaultModel;
       const stream = getClient().chat.completions.stream(
         {
-          model: process.env[config.modelEnv] || config.defaultModel,
+          model,
+          ...config.extraParams?.(model),
           max_tokens: maxTokens,
           messages: [
             { role: "system", content: system },

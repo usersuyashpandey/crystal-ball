@@ -48,7 +48,7 @@ To use a real model, set one key in `.env.local`:
   (`GEMINI_MODEL`). The brief doesn't name Gemini; it's included because
   its free tier needs no card, which makes it the easy way to try the app
   against a real model. Get a key at https://aistudio.google.com/apikey.
-- `GROQ_API_KEY`: Groq, default `llama-3.3-70b-versatile` (`GROQ_MODEL`).
+- `GROQ_API_KEY`: Groq, default `openai/gpt-oss-120b` (`GROQ_MODEL`).
   Also free with no card, and usually much faster to first token than
   Gemini's free tier, which can hit the 8s budget at busy times. Get a key
   at https://console.groq.com/keys.

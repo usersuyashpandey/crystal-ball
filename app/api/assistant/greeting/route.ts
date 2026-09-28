@@ -30,7 +30,9 @@ export async function POST(req: Request) {
 
   try {
     const { system, messages } = GREETING_PROMPT_V1.build(queue);
-    const result = await streamCompletion({ system, messages, maxTokens: 120 });
+    // Room for reasoning models (e.g. gpt-oss), whose thinking counts toward
+    // the limit; the prompt itself keeps the greeting to 1-2 sentences.
+    const result = await streamCompletion({ system, messages, maxTokens: 400 });
     // A half-finished greeting reads worse than the template one.
     const interrupted = result.fullText.includes(INTERRUPTED_NOTICE.trim());
     greeting = (!interrupted && result.fullText.trim()) || fallbackGreeting;
