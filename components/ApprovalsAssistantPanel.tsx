@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, type FormEvent, type ReactNode } from "react";
+import { useEffect, useState, type FormEvent, type ReactNode } from "react";
 import { useAssistantStore, type AssistantView } from "@/lib/store";
 import { ActionCard } from "./ActionCard";
 import { StreamingAnswer } from "./StreamingAnswer";
@@ -25,11 +25,15 @@ const VIEW_TITLE: Record<AssistantView, string> = {
 
 export function ApprovalsAssistantPanel() {
   const isOpen = useAssistantStore((s) => s.isOpen);
+  const isExpanded = useAssistantStore((s) => s.isExpanded);
   const open = useAssistantStore((s) => s.open);
   const close = useAssistantStore((s) => s.close);
+  const toggleExpanded = useAssistantStore((s) => s.toggleExpanded);
   const view = useAssistantStore((s) => s.view);
   const setView = useAssistantStore((s) => s.setView);
   const loadGreeting = useAssistantStore((s) => s.loadGreeting);
+  const greeting = useAssistantStore((s) => s.greeting);
+  const [showInfo, setShowInfo] = useState(false);
 
   if (!isOpen) {
     return (
@@ -43,11 +47,15 @@ export function ApprovalsAssistantPanel() {
     );
   }
 
+  const size = isExpanded ? "h-[min(820px,calc(100vh-3rem))] w-[640px]" : "h-[600px] w-[400px]";
+  const iconButton = "flex h-7 w-7 items-center justify-center rounded-md text-white/70 hover:bg-white/10 hover:text-white";
+
   return (
     <div
       role="dialog"
       aria-label="Approvals assistant"
-      className="fixed bottom-6 right-6 z-50 flex h-[600px] w-[400px] max-w-[calc(100vw-2rem)] flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-2xl"
+      data-expanded={String(isExpanded)}
+      className={`fixed bottom-6 right-6 z-50 flex ${size} max-w-[calc(100vw-2rem)] flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-2xl transition-all`}
     >
       <div className="flex items-center justify-between bg-slate-900 px-4 py-3 text-white">
         <div className="flex items-center gap-2">
@@ -56,10 +64,36 @@ export function ApprovalsAssistantPanel() {
           </span>
           <span className="font-semibold">Approvals</span>
         </div>
-        <button type="button" onClick={close} aria-label="Close assistant" className="text-white/70 hover:text-white">
-          {"✕"}
-        </button>
+        <div className="flex items-center gap-1">
+          <button
+            type="button"
+            onClick={() => setShowInfo((v) => !v)}
+            aria-label="About this assistant"
+            aria-expanded={showInfo}
+            className={iconButton}
+          >
+            {"\u24D8"}
+          </button>
+          <button
+            type="button"
+            onClick={toggleExpanded}
+            aria-label={isExpanded ? "Collapse assistant" : "Expand assistant"}
+            className={iconButton}
+          >
+            {isExpanded ? "\u2921" : "\u2922"}
+          </button>
+          <button type="button" onClick={close} aria-label="Close assistant" className={iconButton}>
+            {"\u2715"}
+          </button>
+        </div>
       </div>
+
+      {showInfo && (
+        <div data-testid="assistant-info" className="border-b border-slate-100 bg-slate-50 px-4 py-2 text-xs text-slate-600">
+          Answers are generated from the live approvals queue and the approval-policy note. The badge under each
+          answer shows whether it came from the live model, the offline mock, or a fallback.
+        </div>
+      )}
 
       <div className="flex items-center justify-between border-b border-slate-100 px-4 py-2 text-xs">
         <button
@@ -68,7 +102,7 @@ export function ApprovalsAssistantPanel() {
           onClick={() => setView("home")}
           className="flex items-center gap-1 font-medium text-slate-500 hover:text-slate-800"
         >
-          {view !== "home" && <span aria-hidden>{"←"}</span>}
+          {view !== "home" && <span aria-hidden>{"\u2190"}</span>}
           {view === "home" ? "Approvals" : VIEW_TITLE[view]}
         </button>
         <button
@@ -86,6 +120,18 @@ export function ApprovalsAssistantPanel() {
         {view === "chat" && <ChatView />}
         {view === "help" && <HelpView />}
         {view === "teach" && <TeachView />}
+      </div>
+
+      <div
+        data-testid="assistant-footer"
+        className="flex items-center justify-between border-t border-slate-100 px-4 py-2 text-xs text-slate-500"
+      >
+        <span>
+          {greeting.status === "done"
+            ? `${greeting.pendingCount} item${greeting.pendingCount === 1 ? "" : "s"} pending`
+            : "\u00a0"}
+        </span>
+        <span>Approvals &amp; Review</span>
       </div>
     </div>
   );
@@ -160,9 +206,12 @@ function SummaryView() {
       {summary.status === "done" && (
         <div className="flex items-center justify-between pt-1">
           <ModeBadge mode={summary.mode} />
-          <button type="button" onClick={() => void runSummary()} className="text-xs font-semibold text-violet-600 hover:text-violet-800">
-            Regenerate
-          </button>
+          <div className="flex items-center gap-3">
+            <ReadAloudButton text={summary.narrative} />
+            <button type="button" onClick={() => void runSummary()} className="text-xs font-semibold text-violet-600 hover:text-violet-800">
+              Regenerate
+            </button>
+          </div>
         </div>
       )}
     </div>
@@ -298,5 +347,41 @@ function FallbackNote({ children }: { children: ReactNode }) {
     <p data-testid="fallback-note" className="rounded-lg bg-amber-50 p-2 text-xs text-amber-800">
       {children}
     </p>
+  );
+}
+
+/**
+ * "Present me Summary ... out loud/in text" (brief §1): the Web Speech API,
+ * in the operator's browser language. Rendered only where the browser
+ * supports speech synthesis; this view is never server-rendered, so
+ * checking the global during render can't cause a hydration mismatch.
+ */
+function ReadAloudButton({ text }: { text: string }) {
+  const [speaking, setSpeaking] = useState(false);
+  const synth = (globalThis as { speechSynthesis?: SpeechSynthesis }).speechSynthesis;
+
+  useEffect(() => () => synth?.cancel(), [synth]);
+
+  if (!synth || typeof SpeechSynthesisUtterance === "undefined" || !text.trim()) return null;
+
+  function toggle() {
+    if (speaking) {
+      synth!.cancel();
+      setSpeaking(false);
+      return;
+    }
+    const utterance = new SpeechSynthesisUtterance(text);
+    utterance.lang = navigator.language;
+    utterance.onend = () => setSpeaking(false);
+    utterance.onerror = () => setSpeaking(false);
+    synth!.cancel();
+    synth!.speak(utterance);
+    setSpeaking(true);
+  }
+
+  return (
+    <button type="button" onClick={toggle} className="text-xs font-semibold text-violet-600 hover:text-violet-800">
+      {speaking ? "Stop reading" : "Read aloud"}
+    </button>
   );
 }
