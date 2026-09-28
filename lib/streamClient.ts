@@ -1,16 +1,25 @@
+import type { DoneFrame } from "./schemas";
+
 /**
  * Client-side SSE reader for the four streaming assistant endpoints.
- * Deliberately hand-rolled with fetch + ReadableStream rather than
- * `EventSource`: EventSource can only do GET and can't send a JSON body
- * (our conversation history/question), so it's not an option for a POST
- * streaming endpoint.
+ * Hand-rolled with fetch + ReadableStream rather than `EventSource`, which
+ * can only GET and can't send the JSON body (history/question) we need.
+ *
+ * Exactly one of onDone / onError is called per request, unless the
+ * caller aborts it (a superseded request), in which case neither is.
  */
 
 export interface StreamHandlers<TStructured> {
   onToken: (text: string) => void;
   onStructured: (data: TStructured) => void;
-  onDone: (mode: "live" | "mock" | "degraded") => void;
+  onDone: (done: DoneFrame) => void;
   onError: (message: string) => void;
+}
+
+const CUT_OFF_MESSAGE = "The response was cut off before it finished. Try again.";
+
+function isAbort(err: unknown, signal?: AbortSignal): boolean {
+  return (err instanceof DOMException && err.name === "AbortError") || Boolean(signal?.aborted);
 }
 
 export async function streamAssistantEndpoint<TStructured>(
@@ -28,6 +37,7 @@ export async function streamAssistantEndpoint<TStructured>(
       signal,
     });
   } catch (err) {
+    if (isAbort(err, signal)) return;
     handlers.onError(err instanceof Error ? err.message : "Network error contacting the assistant.");
     return;
   }
@@ -52,6 +62,7 @@ export async function streamAssistantEndpoint<TStructured>(
   const reader = res.body.getReader();
   const decoder = new TextDecoder();
   let buffer = "";
+  let sawDone = false;
 
   try {
     for (;;) {
@@ -63,29 +74,36 @@ export async function streamAssistantEndpoint<TStructured>(
       while (frameEnd !== -1) {
         const frame = buffer.slice(0, frameEnd);
         buffer = buffer.slice(frameEnd + 2);
-        dispatchFrame(frame, handlers);
+        if (dispatchFrame(frame, handlers) === "done") sawDone = true;
         frameEnd = buffer.indexOf("\n\n");
       }
     }
   } catch (err) {
-    if (err instanceof DOMException && err.name === "AbortError") return;
-    handlers.onError(err instanceof Error ? err.message : "Lost connection while streaming.");
+    if (isAbort(err, signal)) return;
+    handlers.onError(err instanceof Error ? err.message : CUT_OFF_MESSAGE);
+    return;
   }
+
+  if (signal?.aborted) return;
+  // The server always ends with a done frame; a stream that closes without
+  // one was cut off, and leaving the UI in "streaming" would freeze it.
+  if (!sawDone) handlers.onError(CUT_OFF_MESSAGE);
 }
 
-function dispatchFrame<TStructured>(frame: string, handlers: StreamHandlers<TStructured>): void {
+function dispatchFrame<TStructured>(frame: string, handlers: StreamHandlers<TStructured>): string | null {
   const eventMatch = frame.match(/^event: (.+)$/m);
   const dataMatch = frame.match(/^data: (.+)$/m);
-  if (!eventMatch || !dataMatch) return;
+  if (!eventMatch || !dataMatch) return null;
 
   let data: unknown;
   try {
     data = JSON.parse(dataMatch[1]);
   } catch {
-    return;
+    return null;
   }
 
-  switch (eventMatch[1]) {
+  const event = eventMatch[1];
+  switch (event) {
     case "token":
       handlers.onToken((data as { text: string }).text);
       break;
@@ -93,7 +111,8 @@ function dispatchFrame<TStructured>(frame: string, handlers: StreamHandlers<TStr
       handlers.onStructured(data as TStructured);
       break;
     case "done":
-      handlers.onDone((data as { mode: "live" | "mock" | "degraded" }).mode);
+      handlers.onDone(data as DoneFrame);
       break;
   }
+  return event;
 }

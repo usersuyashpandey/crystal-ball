@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, type FormEvent } from "react";
+import { useState, type FormEvent, type ReactNode } from "react";
 import { useAssistantStore, type AssistantView } from "@/lib/store";
 import { ActionCard } from "./ActionCard";
 import { StreamingAnswer } from "./StreamingAnswer";
@@ -151,6 +151,12 @@ function SummaryView() {
           ))}
         </ul>
       )}
+      {summary.status === "done" && summary.structuredSource === "fallback" && (
+        <FallbackNote>
+          The model&apos;s ranking couldn&apos;t be verified against the queue, so this list uses the built-in rules
+          (SLA and safety flags) instead.
+        </FallbackNote>
+      )}
       {summary.status === "done" && (
         <div className="flex items-center justify-between pt-1">
           <ModeBadge mode={summary.mode} />
@@ -268,6 +274,11 @@ function HelpView() {
           ))}
         </div>
       )}
+      {help.status === "done" && help.structuredSource === "fallback" && (
+        <FallbackNote>
+          The model&apos;s citations couldn&apos;t be used, so these are the policy sections retrieval found.
+        </FallbackNote>
+      )}
       {help.status === "done" && (
         <div className="flex items-center justify-between pt-1">
           <ModeBadge mode={help.mode} />
@@ -277,5 +288,15 @@ function HelpView() {
         </div>
       )}
     </div>
+  );
+}
+
+/** Shown whenever the structured part of an answer is the route's local
+ * fallback rather than the model's own (validated) output. */
+function FallbackNote({ children }: { children: ReactNode }) {
+  return (
+    <p data-testid="fallback-note" className="rounded-lg bg-amber-50 p-2 text-xs text-amber-800">
+      {children}
+    </p>
   );
 }

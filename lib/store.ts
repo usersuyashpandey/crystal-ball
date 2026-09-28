@@ -2,6 +2,7 @@ import { create } from "zustand";
 import type {
   ChatMessage,
   StreamMode,
+  StructuredSource,
   SummaryStructured,
   HelpStructured,
   ChatStructured,
@@ -10,18 +11,21 @@ import type {
 import { streamAssistantEndpoint } from "./streamClient";
 
 export type AssistantView = "home" | "summary" | "chat" | "help" | "teach";
-type Status = "idle" | "loading" | "streaming" | "done" | "error";
+/** idle -> loading (request sent, nothing back yet) -> streaming (tokens
+ * arriving) -> done | error */
+export type Status = "idle" | "loading" | "streaming" | "done" | "error";
 
 interface StreamState<TStructured> {
   status: Status;
   narrative: string;
   structured: TStructured | null;
   mode: StreamMode | null;
+  structuredSource: StructuredSource | null;
   error: string | null;
 }
 
 function initialStream<T>(): StreamState<T> {
-  return { status: "idle", narrative: "", structured: null, mode: null, error: null };
+  return { status: "idle", narrative: "", structured: null, mode: null, structuredSource: null, error: null };
 }
 
 interface ConversationState {
@@ -43,8 +47,30 @@ interface GreetingState {
   error: string | null;
 }
 
+type StreamingAction = "summary" | "help" | "chat" | "teach";
+
+/**
+ * One in-flight request per action. Starting a new one aborts the previous
+ * request and bumps the run id, so tokens still arriving from a superseded
+ * stream are ignored instead of being appended to the new one.
+ */
+const inflight: Partial<Record<StreamingAction, { controller: AbortController; id: number }>> = {};
+let nextRunId = 0;
+
+function beginRun(action: StreamingAction) {
+  inflight[action]?.controller.abort();
+  const run = { controller: new AbortController(), id: (nextRunId += 1) };
+  inflight[action] = run;
+  return { signal: run.controller.signal, isCurrent: () => inflight[action]?.id === run.id };
+}
+
+function operatorLanguage(): string {
+  return typeof navigator !== "undefined" && navigator.language ? navigator.language : "en";
+}
+
 interface AssistantStore {
   isOpen: boolean;
+  isExpanded: boolean;
   view: AssistantView;
   greeting: GreetingState;
   summary: StreamState<SummaryStructured>;
@@ -54,6 +80,7 @@ interface AssistantStore {
 
   open: () => void;
   close: () => void;
+  toggleExpanded: () => void;
   setView: (view: AssistantView) => void;
 
   loadGreeting: () => Promise<void>;
@@ -66,162 +93,158 @@ interface AssistantStore {
   retryTeach: () => Promise<void>;
 }
 
-export const useAssistantStore = create<AssistantStore>((set, get) => ({
-  isOpen: false,
-  view: "home",
-  greeting: { text: "", pendingCount: 0, mode: null, status: "idle", error: null },
-  summary: initialStream<SummaryStructured>(),
-  help: { ...initialStream<HelpStructured>(), question: "" },
-  chat: initialConversation(),
-  teach: initialConversation(),
+export const useAssistantStore = create<AssistantStore>((set, get) => {
+  /** Shared streaming for the two single-answer actions. */
+  async function streamSingle<K extends "summary" | "help", T>(key: K, url: string, body: unknown) {
+    const run = beginRun(key);
+    const patch = (p: Partial<StreamState<T>>) => {
+      if (run.isCurrent()) set((s) => ({ [key]: { ...s[key], ...p } }) as Partial<AssistantStore>);
+    };
 
-  open: () => {
-    set({ isOpen: true });
-    if (get().greeting.status === "idle") void get().loadGreeting();
-  },
-  close: () => set({ isOpen: false }),
-  setView: (view) => set({ view }),
-
-  loadGreeting: async () => {
-    set((s) => ({ greeting: { ...s.greeting, status: "loading", error: null } }));
-    try {
-      const res = await fetch("/api/assistant/greeting", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: "{}",
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data?.message ?? "Couldn't load the greeting.");
-      set({
-        greeting: {
-          text: data.greeting,
-          pendingCount: data.pendingCount,
-          mode: data.mode,
-          status: "done",
-          error: null,
-        },
-      });
-    } catch (err) {
-      set((s) => ({
-        greeting: {
-          ...s.greeting,
-          status: "error",
-          error: err instanceof Error ? err.message : "Couldn't load the greeting.",
-        },
-      }));
-    }
-  },
-
-  runSummary: async () => {
-    set({ summary: { ...initialStream<SummaryStructured>(), status: "streaming" } });
-    await streamAssistantEndpoint<SummaryStructured>(
-      "/api/assistant/summary",
-      {},
+    await streamAssistantEndpoint<T>(
+      url,
+      body,
       {
         onToken: (text) =>
-          set((s) => ({ summary: { ...s.summary, narrative: s.summary.narrative + text } })),
-        onStructured: (data) => set((s) => ({ summary: { ...s.summary, structured: data } })),
-        onDone: (mode) => set((s) => ({ summary: { ...s.summary, status: "done", mode } })),
-        onError: (error) => set((s) => ({ summary: { ...s.summary, status: "error", error } })),
+          patch({ status: "streaming", narrative: get()[key].narrative + text } as Partial<StreamState<T>>),
+        onStructured: (structured) => patch({ structured } as Partial<StreamState<T>>),
+        onDone: ({ mode, structuredSource }) => patch({ status: "done", mode, structuredSource }),
+        onError: (error) => patch({ status: "error", error }),
       },
+      run.signal,
     );
-  },
+  }
 
-  askHelp: async (question: string) => {
-    set({ help: { ...initialStream<HelpStructured>(), status: "streaming", question } });
-    await streamAssistantEndpoint<HelpStructured>(
-      "/api/assistant/help",
-      { question },
-      {
-        onToken: (text) => set((s) => ({ help: { ...s.help, narrative: s.help.narrative + text } })),
-        onStructured: (data) => set((s) => ({ help: { ...s.help, structured: data } })),
-        onDone: (mode) => set((s) => ({ help: { ...s.help, status: "done", mode } })),
-        onError: (error) => set((s) => ({ help: { ...s.help, status: "error", error } })),
-      },
-    );
-  },
+  /** Shared streaming for the two conversational actions. */
+  async function streamConversation(key: "chat" | "teach", url: string, body: unknown) {
+    const run = beginRun(key);
+    const patch = (fn: (c: ConversationState) => Partial<ConversationState>) => {
+      if (run.isCurrent()) set((s) => ({ [key]: { ...s[key], ...fn(s[key]) } }) as Partial<AssistantStore>);
+    };
 
-  resetHelp: () => set({ help: { ...initialStream<HelpStructured>(), question: "" } }),
-
-  sendChat: async (message: string) => {
-    const history = get().chat.messages;
-    set((s) => ({
-      chat: {
-        ...s.chat,
-        status: "streaming",
-        error: null,
-        messages: [...s.chat.messages, { role: "user", content: message }, { role: "assistant", content: "" }],
-      },
-    }));
-
-    await streamAssistantEndpoint<ChatStructured>(
-      "/api/assistant/chat",
-      { message, history },
+    await streamAssistantEndpoint<ChatStructured | TeachStructured>(
+      url,
+      body,
       {
         onToken: (text) =>
-          set((s) => {
-            const messages = [...s.chat.messages];
+          patch((c) => {
+            const messages = [...c.messages];
             const last = messages[messages.length - 1];
             messages[messages.length - 1] = { ...last, content: last.content + text };
-            return { chat: { ...s.chat, messages } };
+            return { status: "streaming", messages };
           }),
         onStructured: () => {},
-        onDone: (mode) => set((s) => ({ chat: { ...s.chat, status: "done", mode } })),
-        onError: (error) => set((s) => ({ chat: { ...s.chat, status: "error", error } })),
+        onDone: ({ mode }) => patch(() => ({ status: "done", mode })),
+        onError: (error) => patch(() => ({ status: "error", error })),
       },
+      run.signal,
     );
-  },
+  }
 
-  runTeach: async (message?: string) => {
-    const history = get().teach.messages;
-    const userMessage = message ?? "Walk me through how to review and act on an approval.";
+  function appendExchange(key: "chat" | "teach", userMessage: string) {
     set((s) => ({
-      teach: {
-        ...s.teach,
-        status: "streaming",
+      [key]: {
+        ...s[key],
+        status: "loading",
         error: null,
-        messages: [
-          ...s.teach.messages,
-          { role: "user", content: userMessage },
-          { role: "assistant", content: "" },
-        ],
+        messages: [...s[key].messages, { role: "user", content: userMessage }, { role: "assistant", content: "" }],
       },
-    }));
+    }) as Partial<AssistantStore>);
+  }
 
-    await streamAssistantEndpoint<TeachStructured>(
-      "/api/assistant/teach",
-      { message, history },
-      {
-        onToken: (text) =>
-          set((s) => {
-            const messages = [...s.teach.messages];
-            const last = messages[messages.length - 1];
-            messages[messages.length - 1] = { ...last, content: last.content + text };
-            return { teach: { ...s.teach, messages } };
-          }),
-        onStructured: () => {},
-        onDone: (mode) => set((s) => ({ teach: { ...s.teach, status: "done", mode } })),
-        onError: (error) => set((s) => ({ teach: { ...s.teach, status: "error", error } })),
-      },
-    );
-  },
-
-  retryChat: async () => {
-    const { messages } = get().chat;
-    const lastUserIdx = messages.map((m) => m.role).lastIndexOf("user");
-    if (lastUserIdx === -1) return;
-    const content = messages[lastUserIdx].content;
-    set((s) => ({ chat: { ...s.chat, messages: s.chat.messages.slice(0, lastUserIdx), error: null } }));
-    await get().sendChat(content);
-  },
-
-  retryTeach: async () => {
-    const { messages } = get().teach;
+  /** Remove the failed exchange (the last user message and anything after
+   * it) and return that message's content, so a retry doesn't duplicate it. */
+  function popLastExchange(key: "chat" | "teach"): string | undefined {
+    const { messages } = get()[key];
     const lastUserIdx = messages.map((m) => m.role).lastIndexOf("user");
     set((s) => ({
-      teach: { ...s.teach, messages: lastUserIdx === -1 ? [] : s.teach.messages.slice(0, lastUserIdx), error: null },
-    }));
-    const content = lastUserIdx === -1 ? undefined : messages[lastUserIdx].content;
-    await get().runTeach(content);
-  },
-}));
+      [key]: { ...s[key], error: null, messages: lastUserIdx === -1 ? [] : s[key].messages.slice(0, lastUserIdx) },
+    }) as Partial<AssistantStore>);
+    return lastUserIdx === -1 ? undefined : messages[lastUserIdx].content;
+  }
+
+  return {
+    isOpen: false,
+    isExpanded: false,
+    view: "home",
+    greeting: { text: "", pendingCount: 0, mode: null, status: "idle", error: null },
+    summary: initialStream<SummaryStructured>(),
+    help: { ...initialStream<HelpStructured>(), question: "" },
+    chat: initialConversation(),
+    teach: initialConversation(),
+
+    open: () => {
+      set({ isOpen: true });
+      if (get().greeting.status === "idle") void get().loadGreeting();
+    },
+    close: () => set({ isOpen: false }),
+    toggleExpanded: () => set((s) => ({ isExpanded: !s.isExpanded })),
+    setView: (view) => set({ view }),
+
+    loadGreeting: async () => {
+      set((s) => ({ greeting: { ...s.greeting, status: "loading", error: null } }));
+      try {
+        const res = await fetch("/api/assistant/greeting", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: "{}",
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data?.message ?? "Couldn't load the greeting.");
+        set({
+          greeting: { text: data.greeting, pendingCount: data.pendingCount, mode: data.mode, status: "done", error: null },
+        });
+      } catch (err) {
+        set((s) => ({
+          greeting: {
+            ...s.greeting,
+            status: "error",
+            error: err instanceof Error ? err.message : "Couldn't load the greeting.",
+          },
+        }));
+      }
+    },
+
+    runSummary: async () => {
+      set({ summary: { ...initialStream<SummaryStructured>(), status: "loading" } });
+      await streamSingle<"summary", SummaryStructured>("summary", "/api/assistant/summary", {
+        language: operatorLanguage(),
+      });
+    },
+
+    askHelp: async (question: string) => {
+      set({ help: { ...initialStream<HelpStructured>(), status: "loading", question } });
+      await streamSingle<"help", HelpStructured>("help", "/api/assistant/help", { question });
+    },
+
+    resetHelp: () => {
+      inflight.help?.controller.abort();
+      set({ help: { ...initialStream<HelpStructured>(), question: "" } });
+    },
+
+    sendChat: async (message: string) => {
+      const history = get().chat.messages;
+      appendExchange("chat", message);
+      await streamConversation("chat", "/api/assistant/chat", { message, history });
+    },
+
+    runTeach: async (message?: string) => {
+      const history = get().teach.messages;
+      appendExchange("teach", message ?? "Walk me through how to review and act on an approval.");
+      await streamConversation("teach", "/api/assistant/teach", { message, history });
+    },
+
+    retryChat: async () => {
+      const content = popLastExchange("chat");
+      if (content !== undefined) await get().sendChat(content);
+    },
+
+    retryTeach: async () => {
+      const content = popLastExchange("teach");
+      // The very first Teach request has no typed message; the server
+      // supplies the default "walk me through" prompt when it's omitted.
+      const isDefaultOpener = get().teach.messages.length === 0;
+      await get().runTeach(isDefaultOpener ? undefined : content);
+    },
+  };
+});

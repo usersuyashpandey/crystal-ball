@@ -35,7 +35,7 @@ export function ChatThread({ messages, status, error, placeholder, onSend, onRet
                 m.role === "user" ? "bg-violet-600 text-white" : "bg-slate-100 text-slate-800"
               }`}
             >
-              {m.content || (status === "streaming" && i === messages.length - 1 ? (
+              {m.content || ((status === "streaming" || status === "loading") && i === messages.length - 1 ? (
                 <span data-testid="streaming-cursor" className="inline-block h-3 w-1.5 animate-pulse bg-slate-400 align-middle" />
               ) : null)}
             </div>
